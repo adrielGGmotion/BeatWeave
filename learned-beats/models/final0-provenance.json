@@ -1,0 +1,118 @@
+{
+  "model": "CPJKU/beat_this final0",
+  "variant": "optional accuracy backend",
+  "license": "MIT (code and published model weights)",
+  "license_source": "https://github.com/CPJKU/beat_this/blob/b95c8ab0c58c2d9fcfd40508ae8dffbc05ac4f5c/README.md#license",
+  "upstream_repository": "https://github.com/CPJKU/beat_this",
+  "upstream_commit": "b95c8ab0c58c2d9fcfd40508ae8dffbc05ac4f5c",
+  "upstream_source_sha256": {
+    "beat_this/model/beat_tracker.py": "bfa2fd212b4d6bf00b007eb0e606a6b11f1f7fc44c95bd1121ef5d2a934a923f",
+    "beat_this/model/roformer.py": "c83fa0047fe726bbfdb33658f40a0f9e721c5796067bfda560092e5969d50722",
+    "beat_this/inference.py": "ccccff4665399b931ebf181b73d264a6ad64fc1fe8acb4d3b950df825c47ce2d",
+    "beat_this/utils.py": "779d6102ea28bdf94c8227157790191f5abbbb4564d0c36ce5ce0859e067cfab"
+  },
+  "checkpoint_url": "https://cloud.cp.jku.at/public.php/dav/files/7ik4RrBKTS273gp/final0.ckpt",
+  "checkpoint_sha256": "8c328b45f59d8dd3dff219253ff6a8d6482be57d0133a29140e2febbf8eb8331",
+  "onnx_sha256": "c8293b7b787e73b40ad5e899624dbe08763268031543ef7ebcab53f8e78da66f",
+  "onnx_bytes": 82113665,
+  "raw_onnx_sha256": "842f64f16d021b9494782540cb37b6e2e56502142b37779e7e8ff0650a20088f",
+  "attention_tiling": {
+    "source_sha256": "842f64f16d021b9494782540cb37b6e2e56502142b37779e7e8ff0650a20088f",
+    "output_sha256": "74ba38d710fc5248ffdcd456fb8d41dbf9cd3df9b826fd85ca717015423712f1",
+    "query_rows": 128,
+    "temporal_context_frames": 1500,
+    "onnx": "1.19.0",
+    "modified_operations": [
+      "/model/frontend/blocks/blocks.0/partial/attnT/attend/Softmax",
+      "/model/frontend/blocks/blocks.1/partial/attnT/attend/Softmax",
+      "/model/frontend/blocks/blocks.2/partial/attnT/attend/Softmax",
+      "/model/transformer_blocks/layers.0.0/attend/Softmax",
+      "/model/transformer_blocks/layers.1.0/attend/Softmax",
+      "/model/transformer_blocks/layers.2.0/attend/Softmax",
+      "/model/transformer_blocks/layers.3.0/attend/Softmax",
+      "/model/transformer_blocks/layers.4.0/attend/Softmax",
+      "/model/transformer_blocks/layers.5.0/attend/Softmax"
+    ]
+  },
+  "interface_normalization": {
+    "source_sha256": "74ba38d710fc5248ffdcd456fb8d41dbf9cd3df9b826fd85ca717015423712f1",
+    "output_sha256": "c8293b7b787e73b40ad5e899624dbe08763268031543ef7ebcab53f8e78da66f",
+    "output_names": {
+      "beat": "beat_logits",
+      "downbeat": "downbeat_logits"
+    },
+    "bytes": 82113665,
+    "inverse_name_mapping_serialization_identical": true
+  },
+  "opset": 17,
+  "input": "float32 [1,frames,128] spectrogram",
+  "outputs": [
+    "float32 [1,frames] beat_logits",
+    "float32 [1,frames] downbeat_logits"
+  ],
+  "supported_frames": "1..1500",
+  "context": "Full1500frame context; query tiling retains all keys and values",
+  "frontend": "Existing exact Kotlin BeatThisFrontend,22050Hz,1024FFT,441hop,128melbins",
+  "chunking": "1500frames,6frameborder,keep_first; unchanged upstream convention",
+  "versions": {
+    "python": "3.12",
+    "torch": "2.5.1+cpu",
+    "torchaudio": "2.5.1+cpu",
+    "numpy": "1.26.4",
+    "onnx": "1.19.0",
+    "onnxruntime": "1.22.0",
+    "einops": "0.8.1",
+    "rotary-embedding-torch": "0.8.6"
+  },
+  "reproduction_command": "PYTHONPATH=/path/to/pinned/beat_this python learned-beats/tools/export_final0.py final0.ckpt learned-beats/models/beat-this-final0.onnx",
+  "reproduction_result": "Ran new export script in a clean model instance; exact final artifact SHA reproduced",
+  "numerical_validation": {
+    "fixed_recordings": 20,
+    "all20_manifest_ids_verified": true,
+    "absolute_tolerance": 0.001,
+    "native_vs_third_party_max_abs_logit_error": 6.198883056640625e-05,
+    "native_vs_local_tiled_max_abs_logit_error": 6.866455078125e-05,
+    "all20_native_beat_and_downbeat_frame_parity": true,
+    "dynamic_shapes": [
+      1,
+      63,
+      128,
+      151,
+      500,
+      1264,
+      1499,
+      1500
+    ],
+    "all_dynamic_numeric_pass": true,
+    "production_allocation_official_event_parity": "19 records saved before runtime session interruption; remaining record verified in fresh final-interface process. Exact fixed20 set asserted.",
+    "folded_convolutions": "All8 weights/biases independently compared with official evaluation Conv2d+BatchNorm2d fusion; maximum2.384e-7",
+    "interface_name_change": "Inverse output renaming reproduces fully verified tiled graph serialized bytes exactly"
+  },
+  "resource_measurement": {
+    "model_sha256": "c8293b7b787e73b40ad5e899624dbe08763268031543ef7ebcab53f8e78da66f",
+    "runtime": "1.22.0",
+    "input": "spectrogram",
+    "outputs": [
+      "beat_logits",
+      "downbeat_logits"
+    ],
+    "threads": 2,
+    "enable_cpu_mem_arena": false,
+    "enable_mem_pattern": false,
+    "recording": "gtzan_rock_00001",
+    "frames": 1501,
+    "chunks": 2,
+    "session_seconds": 0.8967441139993753,
+    "inference_seconds": 4.092352826999559,
+    "max_abs_logit_error": 5.1975250244140625e-05,
+    "official_event_frame_parity": {
+      "beats": true,
+      "downbeats": true
+    },
+    "peak_whole_process_rss_mib": 659.20703125,
+    "limitations": "Host Python CPU process, cached Kotlin mels; not Android RSS or end-to-end audio decoding performance."
+  },
+  "training_overlap": "Upstream identifies final0 as trained on all their data except GTZAN. This validation uses the fixed20 GTZAN00000/00001 recordings.",
+  "evidence_directory": "validation/final0-export-0.10.0",
+  "accuracy_note": "Numerical parity proves faithful execution of the upstream model. It does not prove all predicted beats, bar levels or downbeats are correct. Earlier fixed20 metrical-consensus findings remain valid; optional final0 does not remove metrical ambiguity."
+}

@@ -1,0 +1,67 @@
+{
+  "model": "CPJKU/beat_this small0",
+  "license": "MIT (code and published weights)",
+  "upstream_repository": "https://github.com/CPJKU/beat_this",
+  "upstream_commit": "b95c8ab0c58c2d9fcfd40508ae8dffbc05ac4f5c",
+  "checkpoint_url": "https://cloud.cp.jku.at/public.php/dav/files/7ik4RrBKTS273gp/small0.ckpt",
+  "checkpoint_sha256": "6074be2c4d490c5f6101fcc374a1ec72ae93456e23bb6019783b849f5dc7d47b",
+  "onnx_sha256": "b6d54bca156b039593b6d9d48fd3ab3e5d09be06bbbe2706f0376c9f103d5191",
+  "opset": 17,
+  "input": "float32 [1,frames,128] logmel",
+  "output": "float32 [1,frames] beat_logits, downbeat_logits",
+  "torch": "2.14.0+cpu",
+  "onnx": "1.23.0",
+  "onnxruntime": "1.22.0",
+  "numerical_checks": [
+    {
+      "frames": 151,
+      "max_abs_logit_error": [
+        2.384185791015625e-06,
+        3.0994415283203125e-06
+      ]
+    },
+    {
+      "frames": 500,
+      "max_abs_logit_error": [
+        2.6226043701171875e-06,
+        3.814697265625e-06
+      ]
+    },
+    {
+      "frames": 1500,
+      "max_abs_logit_error": [
+        3.0994415283203125e-06,
+        3.5762786865234375e-06
+      ]
+    }
+  ],
+  "accuracy_note": "Numerical parity with upstream is not a claim that predicted beats are always correct.",
+  "raw_onnx_sha256": "463f6c85a0fc613ebfe970e96ba4e4dcb47dd20dc7b63a5d3d1053e0a98a57d9",
+  "attention_tiling": {
+    "source_sha256": "463f6c85a0fc613ebfe970e96ba4e4dcb47dd20dc7b63a5d3d1053e0a98a57d9",
+    "output_sha256": "b6d54bca156b039593b6d9d48fd3ab3e5d09be06bbbe2706f0376c9f103d5191",
+    "query_rows": 128,
+    "temporal_context_frames": 1500,
+    "onnx": "1.19.0",
+    "modified_operations": [
+      "/model/frontend/blocks/blocks.0/partial/attnT/attend/Softmax",
+      "/model/frontend/blocks/blocks.1/partial/attnT/attend/Softmax",
+      "/model/frontend/blocks/blocks.2/partial/attnT/attend/Softmax",
+      "/model/transformer_blocks/layers.0.0/attend/Softmax",
+      "/model/transformer_blocks/layers.1.0/attend/Softmax",
+      "/model/transformer_blocks/layers.2.0/attend/Softmax",
+      "/model/transformer_blocks/layers.3.0/attend/Softmax",
+      "/model/transformer_blocks/layers.4.0/attend/Softmax",
+      "/model/transformer_blocks/layers.5.0/attend/Softmax"
+    ]
+  },
+  "numerical_checks_scope": "Original untiled export versus upstream PyTorch; tiled parity separately recorded below.",
+  "tiled_numerical_checks": {
+    "report": "validation/onnx-memory-0.9.0/tiled-attention/parity.json",
+    "report_sha256": "bda37708fdc5890831e77f6f54bed2d1774cf1e6cb531d99604ad98ba6881d87",
+    "dynamic_shapes": 15,
+    "max_dynamic_logit_error": 3.0994415283203125e-06,
+    "recordings": 16,
+    "all_full_recording_logits_bit_identical": true
+  }
+}
