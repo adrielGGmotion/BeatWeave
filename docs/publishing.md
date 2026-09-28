@@ -1,11 +1,14 @@
 # Publishing to Maven Central
 
-BeatWeave 0.10.0 is not yet published to Maven Central. The verified Central
-namespace is `io.github.adrielggmotion`, and the release group is
-`io.github.adrielggmotion.beatweave`. The public source repository is
-[github.com/adrielGGmotion/BeatWeave](https://github.com/adrielGGmotion/BeatWeave)
-and its URL is configured in `gradle.properties`. A Central deployment still
-requires a maintainer to review it and click **Publish** in the Portal.
+BeatWeave 0.10.0 is published to Maven Central under
+`io.github.adrielggmotion.beatweave`. Consumers can use `mavenCentral()` as shown
+in the [README](../README.md#getting-started). This version is immutable; future
+releases must use a new version.
+
+The verified Central namespace is `io.github.adrielggmotion`. The public source
+repository is [github.com/adrielGGmotion/BeatWeave](https://github.com/adrielGGmotion/BeatWeave)
+and its URL is configured in `gradle.properties`. Future Central deployments
+require maintainer review and explicit approval before publication.
 
 ## Release contents
 
@@ -133,6 +136,7 @@ its validation in the Central Portal and click **Publish** yourself. Do not use
 `publishAndReleaseToMavenCentral` unless you intend immediate public release.
 Snapshot versions have different Portal behavior and are not this release flow.
 
-After Central finishes publishing, consumers can replace the local repository
-with `mavenCentral()` and use your actual verified group and released version.
+After publishing a new version, verify that its artifacts are publicly available
+from Maven Central before announcing it. Consumers use `mavenCentral()` with the
+released coordinates; local repositories are only needed for development builds.
 No automatic publishing workflow or credentials are stored in this repository.

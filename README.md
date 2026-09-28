@@ -25,16 +25,14 @@ builds cover arm64-v8a, armeabi-v7a and x86_64. Common iOS targets are optional
 
 ## Getting started
 
-Follow [the build instructions](docs/build.md) to install the toolchain, build the
-native libraries and publish the modules to the local `dist/maven` repository.
+BeatWeave 0.10.0 is available from Maven Central; no local library build is needed.
 Model files are separate; [model setup](docs/models.md) explains how to install
 and verify them. No model or audio is downloaded during analysis.
 
-After publishing locally, add the repository to your application's Gradle build:
+Add the dependencies to your application's Gradle build:
 
 ```kotlin
 repositories {
-    maven { url = uri("/absolute/path/to/BeatWeave/dist/maven") }
     mavenCentral()
 }
 
@@ -45,10 +43,9 @@ dependencies {
 }
 ```
 
-These coordinates refer to artifacts you build locally. Version 0.10.0 has not
-yet been published to Maven Central. [Publishing](docs/publishing.md) covers
-signing and the manually approved Central release process. The configured Maven
-group is `io.github.adrielggmotion.beatweave`.
+To build or modify the library itself, follow [the build instructions](docs/build.md).
+[Publishing](docs/publishing.md) covers signing and the manually approved Central
+release process.
 
 The Android AAR includes its native libraries. The JVM JAR includes the Linux
 x86_64 (glibc) native library; consumers do not need CMake or `java.library.path`.
