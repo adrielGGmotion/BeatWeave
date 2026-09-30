@@ -3,6 +3,7 @@ package org.metrolist.beatweave.learned
 import kotlin.math.abs
 import kotlin.math.min
 import kotlin.math.roundToLong
+import kotlin.math.sqrt
 import org.metrolist.beatweave.*
 
 /** Resource bounds, not permission to relax musical or clock acceptance. */
@@ -32,6 +33,7 @@ enum class AutoMixTrackRole {
 
 enum class AutoMixSearchStrategy {
     ORDERED_TRANSITION_SCAN,
+    RANKED_TRANSITION_SCAN,
     CONSTANT_METER_MERGE,
     GENERAL_PREFIX_SCAN,
 }
@@ -81,6 +83,8 @@ data class MatchedBarBoundary(
 
 enum class AutoMixSelectionPolicy {
     EARLY_INCOMING_LATE_OUTGOING,
+    AUDIO_AWARE_RANKING,
+    AUTOMATIC_LENGTH_FALLBACK,
     LONGEST_SUPPORTED_OVERLAP,
 }
 
@@ -99,6 +103,7 @@ data class AutoMixSelection(
     val incomingStartSeconds: Double,
     val incomingEndSeconds: Double,
     val search: AutoMixSearchReport,
+    val musicalCueEvidence: MusicalCueEvidence? = null,
 )
 
 /**
@@ -120,15 +125,69 @@ object AutoMixPlanner {
         qualityLimits: WarpQualityLimits = WarpQualityLimits(),
         searchOptions: AutoMixSearchOptions = AutoMixSearchOptions(),
         isCancelled: () -> Boolean = { false },
+    ): LocalMixPlan =
+        planTransition(
+            first, second, bars, outputSampleRate, fitOptions, qualityLimits,
+            searchOptions, isCancelled,
+        )
+
+    /** Chooses the fade length and cue pair together, subject to the same bar and clock gates. */
+    fun bestTransition(
+        first: LocalSongAnalysis,
+        second: LocalSongAnalysis,
+        outputSampleRate: Int = 48000,
+        fitOptions: ClockFitOptions = ClockFitOptions(),
+        qualityLimits: WarpQualityLimits = WarpQualityLimits(),
+        searchOptions: AutoMixSearchOptions = AutoMixSearchOptions(),
+        isCancelled: () -> Boolean = { false },
+    ): LocalMixPlan =
+        planTransition(
+            first, second, null, outputSampleRate, fitOptions, qualityLimits,
+            searchOptions, isCancelled,
+        )
+
+    private fun planTransition(
+        first: LocalSongAnalysis,
+        second: LocalSongAnalysis,
+        bars: Int?,
+        outputSampleRate: Int,
+        fitOptions: ClockFitOptions,
+        qualityLimits: WarpQualityLimits,
+        searchOptions: AutoMixSearchOptions,
+        isCancelled: () -> Boolean,
     ): LocalMixPlan {
-        require(bars in TransitionPlanner.supportedBarCounts) { "Choose 2, 4, 8, 16 or 32 bars" }
+        require(bars == null || bars in TransitionPlanner.supportedBarCounts) {
+            "Choose 2, 4, 8, 16 or 32 bars"
+        }
         require(outputSampleRate in 22050..96000)
         val search = Search(MixMode.TRANSITION, bars, searchOptions, isCancelled)
-        search.strategy = AutoMixSearchStrategy.ORDERED_TRANSITION_SCAN
         val a = supported(first, AutoMixTrackRole.OUTGOING, search)
         val b = supported(second, AutoMixTrackRole.INCOMING, search)
         search.requireSupportedTracks()
-        // Incoming cue order is primary; among equally early entries prefer a late exit.
+        val ranking = MusicalCueRanking(first.audio, second.audio)
+        // Caller-assembled analyses without audio features retain the earlier deterministic policy
+        // for an explicitly requested length. The fully automatic path still selects a length.
+        if (!ranking.available && bars != null)
+            return orderedTransition(
+                first, second, a, b, bars, outputSampleRate, fitOptions, qualityLimits, search
+            )
+        return rankedTransition(
+            first, second, a, b, bars, ranking, outputSampleRate, fitOptions, qualityLimits, search
+        )
+    }
+
+    private fun orderedTransition(
+        first: LocalSongAnalysis,
+        second: LocalSongAnalysis,
+        a: SupportedBars,
+        b: SupportedBars,
+        bars: Int,
+        outputSampleRate: Int,
+        fitOptions: ClockFitOptions,
+        qualityLimits: WarpQualityLimits,
+        search: Search,
+    ): LocalMixPlan {
+        search.strategy = AutoMixSearchStrategy.ORDERED_TRANSITION_SCAN
         for (incoming in 0 until b.grid.barCount) {
             if (b.endByStart[incoming] - incoming < bars) continue
             for (outgoing in a.grid.barCount - bars downTo 0) {
@@ -136,28 +195,114 @@ object AutoMixPlanner {
                 if (
                     a.endByStart[outgoing] - outgoing < bars ||
                         !sameBars(a.grid, b.grid, outgoing, incoming, bars)
-                )
-                    continue
+                ) continue
                 if (a.grid.boundary(outgoing + bars) - a.grid.boundary(outgoing) > 512) continue
                 search.compatible++
                 val result =
                     tryCandidate(
-                        first,
-                        second,
-                        a.grid,
-                        b.grid,
-                        outgoing,
-                        incoming,
-                        bars,
-                        MixMode.TRANSITION,
-                        outputSampleRate,
-                        fitOptions,
-                        qualityLimits,
-                        search,
-                        AutoMixSelectionPolicy.EARLY_INCOMING_LATE_OUTGOING,
+                        first, second, a.grid, b.grid, outgoing, incoming, bars,
+                        MixMode.TRANSITION, outputSampleRate, fitOptions, qualityLimits,
+                        search, AutoMixSelectionPolicy.EARLY_INCOMING_LATE_OUTGOING,
                     )
                 if (result != null) return result
             }
+        }
+        search.decline()
+    }
+
+    private data class RankedStart(val bar: Int, val part: MusicalCueRanking.Part)
+
+    private data class RankedTransition(
+        val outgoing: Int,
+        val incoming: Int,
+        val bars: Int,
+        val evidence: MusicalCueEvidence,
+    )
+
+    private fun rankedTransition(
+        first: LocalSongAnalysis,
+        second: LocalSongAnalysis,
+        a: SupportedBars,
+        b: SupportedBars,
+        requestedBars: Int?,
+        ranking: MusicalCueRanking,
+        outputSampleRate: Int,
+        fitOptions: ClockFitOptions,
+        qualityLimits: WarpQualityLimits,
+        search: Search,
+    ): LocalMixPlan {
+        search.strategy = AutoMixSearchStrategy.RANKED_TRANSITION_SCAN
+        val lengths = requestedBars?.let(::listOf) ?: TransitionPlanner.supportedBarCounts.toList()
+        // Limit the Cartesian scan on long recordings without changing any timing acceptance gate.
+        val perTrackLimit =
+            sqrt(search.options.maximumCandidatePairs.toDouble() / lengths.size).toInt()
+                .coerceIn(1, 128)
+        val candidates = ArrayList<RankedTransition>()
+        for (bars in lengths) {
+            search.checkCancellation()
+            fun starts(song: SupportedBars, outgoing: Boolean): List<RankedStart> =
+                (0..song.grid.barCount - bars)
+                    .filter { song.endByStart[it] - it >= bars }
+                    .map {
+                        RankedStart(
+                            it,
+                            if (outgoing) ranking.outgoing(song.grid, it, bars)
+                            else ranking.incoming(song.grid, it, bars),
+                        )
+                    }
+                    .sortedWith(
+                        compareByDescending<RankedStart> { it.part.score }
+                            .thenBy { if (outgoing) -it.bar else it.bar }
+                    )
+                    .take(perTrackLimit)
+            val outgoing = starts(a, true)
+            val incoming = starts(b, false)
+            for (entry in incoming) for (exit in outgoing) {
+                search.inspect()
+                if (!sameBars(a.grid, b.grid, exit.bar, entry.bar, bars)) continue
+                if (a.grid.boundary(exit.bar + bars) - a.grid.boundary(exit.bar) > 512) continue
+                search.compatible++
+                val measured = ranking.evidence(exit.part, entry.part, bars)
+                val evidence =
+                    if (ranking.available) measured
+                    else {
+                        val lengthOrder =
+                            when (bars) {
+                                8 -> 5
+                                4 -> 4
+                                16 -> 3
+                                2 -> 2
+                                else -> 1
+                            }
+                        measured.copy(score = 10.0 * lengthOrder + exit.part.score + entry.part.score)
+                    }
+                candidates +=
+                    RankedTransition(
+                        exit.bar,
+                        entry.bar,
+                        bars,
+                        evidence,
+                    )
+            }
+        }
+        candidates.sortWith(
+            compareByDescending<RankedTransition> { it.evidence.score }
+                .thenBy { it.incoming }
+                .thenByDescending { it.outgoing }
+                .thenBy { it.bars }
+        )
+        for (candidate in candidates) {
+            search.checkCancellation()
+            val result =
+                tryCandidate(
+                    first, second, a.grid, b.grid,
+                    candidate.outgoing, candidate.incoming, candidate.bars,
+                    MixMode.TRANSITION, outputSampleRate, fitOptions, qualityLimits, search,
+                    if (ranking.available) AutoMixSelectionPolicy.AUDIO_AWARE_RANKING
+                    else AutoMixSelectionPolicy.AUTOMATIC_LENGTH_FALLBACK,
+                    if (ranking.available) candidate.evidence else null,
+                )
+            if (result != null) return result
         }
         search.decline()
     }
@@ -662,6 +807,7 @@ object AutoMixPlanner {
         qualityLimits: WarpQualityLimits,
         search: Search,
         policy: AutoMixSelectionPolicy,
+        musicalCueEvidence: MusicalCueEvidence? = null,
     ): LocalMixPlan? {
         search.beforeFit()
         val selection =
@@ -680,6 +826,7 @@ object AutoMixPlanner {
                 b.beats.at(b.boundary(incoming)),
                 b.beats.at(b.boundary(incoming + bars)),
                 search.report(),
+                musicalCueEvidence,
             )
         return try {
             scopedPlan(

@@ -131,8 +131,7 @@ object LocalMixPlanner {
         )
 
     /**
-     * No manual cues required. Requested length is exact; unsupported lengths are not silently
-     * shortened.
+     * No manual cues required. The requested length remains exact and is never silently shortened.
      */
     fun autoTransition(
         first: LocalSongAnalysis,
@@ -148,6 +147,26 @@ object LocalMixPlanner {
             first,
             second,
             bars,
+            outputSampleRate,
+            fitOptions,
+            qualityLimits,
+            searchOptions,
+            isCancelled,
+        )
+
+    /** Selects both a supported length and cues from the measured audio, then checks the clock. */
+    fun bestTransition(
+        first: LocalSongAnalysis,
+        second: LocalSongAnalysis,
+        outputSampleRate: Int = 48000,
+        fitOptions: ClockFitOptions = ClockFitOptions(),
+        qualityLimits: WarpQualityLimits = WarpQualityLimits(),
+        searchOptions: AutoMixSearchOptions = AutoMixSearchOptions(),
+        isCancelled: () -> Boolean = { false },
+    ): LocalMixPlan =
+        AutoMixPlanner.bestTransition(
+            first,
+            second,
             outputSampleRate,
             fitOptions,
             qualityLimits,

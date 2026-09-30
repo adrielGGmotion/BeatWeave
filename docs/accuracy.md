@@ -5,6 +5,12 @@ not reliable enough for unattended mixing across arbitrary music. It sometimes
 accepts the wrong bar level or phase, and its checks also reject usable passages.
 Model confidence and agreement between detectors do not establish musical truth.
 
+The current source checkout adds an unreleased energy/onset cue ranking pass and
+automatic fade-length selection. The 0.10.0 measurements below predate that change;
+they do not measure its musical quality. The new scores do not classify choruses,
+drops or vocal overlap. Compare its rendered choices by listening before treating
+it as suitable for unattended mixing.
+
 The results below are from the archived **0.10.0 validation run**, before this
 repository reorganization. They are not a fresh execution of the repository's
 tests. The full report, frozen input identities, output hashes and failure records

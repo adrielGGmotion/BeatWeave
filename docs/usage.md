@@ -53,9 +53,13 @@ region checks; unchanged raw timestamps do not imply unchanged eligibility.
 ```kotlin
 import org.metrolist.beatweave.learned.LocalMixPlanner
 
-val transition = LocalMixPlanner.autoTransition(
-    firstAnalysis, secondAnalysis, bars = 16, outputSampleRate = 48000,
+val transition = LocalMixPlanner.bestTransition(
+    firstAnalysis, secondAnalysis, outputSampleRate = 48000,
     isCancelled = isCancelled,
+)
+
+val fixedLength = LocalMixPlanner.autoTransition(
+    firstAnalysis, secondAnalysis, bars = 8,
 )
 
 val selectedTransition = LocalMixPlanner.transition(
@@ -66,9 +70,17 @@ val selectedTransition = LocalMixPlanner.transition(
 val overlap = LocalMixPlanner.overlap(firstAnalysis, secondAnalysis)
 ```
 
-Automatic transitions try the earliest supported incoming entry and latest
-compatible outgoing exit. Requested lengths are exactly **2, 4, 8, 16 or 32 bars**;
-the planner does not substitute a shorter transition. Explicit bar indices are
+In the current source checkout, `bestTransition` ranks timing-safe candidates
+across **2, 4, 8, 16 and 32 bars**. It uses measured energy and onset changes to
+favor an incoming lift and an outgoing release. `autoTransition` ranks cues at
+its requested length (16 by default); it does not silently shorten the fade.
+Caller-assembled analyses without energy features use the earlier earliest-incoming,
+latest-outgoing policy for fixed lengths. The released 0.10.0 artifacts still use
+the earlier policy and a default of 16 bars.
+
+These relative audio features do not identify a chorus, drop, phrase or vocal
+part. `automaticSelection.musicalCueEvidence` reports the measured cue score when
+available; `automaticSelection.policy` indicates the fallback. Explicit bar indices are
 zero-based. Every corresponding bar must contain the same number of canonical
 pulses, including any matched meter changes.
 

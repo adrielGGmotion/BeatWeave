@@ -79,6 +79,20 @@ class AutoMixPlannerTest {
         )
     }
 
+    private fun withBarEnergy(song: LocalSongAnalysis, levels: List<Double>): LocalSongAnalysis {
+        val grid = song.barTracking!!.grid()
+        require(levels.size == grid.barCount)
+        val blocks =
+            levels.mapIndexed { bar, db ->
+                EnergyBlock(
+                    grid.beats.at(grid.boundary(bar)),
+                    grid.beats.at(grid.boundary(bar + 1)),
+                    db,
+                )
+            }
+        return song.copy(audio = song.audio.copy(energyBlocks = blocks))
+    }
+
     @Test
     fun automaticTransitionsChooseEarlyIncomingAndLateOutgoingForEachRequestedLength() {
         val a = song(List(40) { 4 })
@@ -104,6 +118,55 @@ class AutoMixPlannerTest {
             )
             assertTrue(result.mixPlan.releaseAfterFade)
         }
+    }
+
+    @Test
+    fun measuredEnergyRanksAnIncomingLiftAndOutgoingReleaseOverTheOldCueOrder() {
+        val outgoing = withBarEnergy(song(List(20) { 4 }, period = 0.6), List(16) { -12.0 } + List(4) { -24.0 })
+        val incoming = withBarEnergy(song(List(20) { 4 }, period = 0.6), List(12) { -24.0 } + List(8) { -8.0 })
+        val plan = LocalMixPlanner.autoTransition(outgoing, incoming, bars = 4)
+        val selected = assertNotNull(plan.automaticSelection)
+        assertEquals(AutoMixSelectionPolicy.AUDIO_AWARE_RANKING, selected.policy)
+        assertEquals(16, selected.outgoingStartBar)
+        assertEquals(8, selected.incomingStartBar)
+        assertTrue(assertNotNull(selected.musicalCueEvidence).incomingEndLift > 0.5)
+        assertEquals(5, plan.barMatches.size)
+        assertTrue(plan.barMatches.all { kotlin.math.abs(it.originalBoundaryOutputResidualSeconds) < 1e-8 })
+    }
+
+    @Test
+    fun fullyAutomaticModeSelectsLengthAsWellAsTimingSafeCues() {
+        val outgoing = withBarEnergy(song(List(20) { 4 }, period = 0.6), List(16) { -12.0 } + List(4) { -24.0 })
+        val incoming = withBarEnergy(song(List(20) { 4 }, period = 0.6), List(12) { -24.0 } + List(8) { -8.0 })
+        val selected = assertNotNull(LocalMixPlanner.bestTransition(outgoing, incoming).automaticSelection)
+        assertEquals(4, selected.barCount)
+        assertEquals(16, selected.outgoingStartBar)
+        assertEquals(8, selected.incomingStartBar)
+        assertEquals(null, selected.search.requestedBars)
+    }
+
+    @Test
+    fun earlyBreakDoesNotDiscardMostOfTheOutgoingSong() {
+        val outgoing =
+            withBarEnergy(
+                song(List(20) { 4 }, period = 0.6),
+                List(8) { -10.0 } + List(4) { -30.0 } + List(4) { -10.0 } + List(4) { -20.0 },
+            )
+        val incoming = withBarEnergy(song(List(20) { 4 }, period = 0.6), List(12) { -24.0 } + List(8) { -8.0 })
+        val selected = assertNotNull(LocalMixPlanner.autoTransition(outgoing, incoming, bars = 4).automaticSelection)
+        assertEquals(16, selected.outgoingStartBar)
+        assertEquals(8, selected.incomingStartBar)
+    }
+
+    @Test
+    fun missingAudioFeaturesKeepExplicitLengthPolicyAndChooseAConservativeAutomaticLength() {
+        val a = song(List(20) { 4 })
+        val explicit = assertNotNull(LocalMixPlanner.autoTransition(a, a, bars = 4).automaticSelection)
+        assertEquals(AutoMixSelectionPolicy.EARLY_INCOMING_LATE_OUTGOING, explicit.policy)
+        val automatic = assertNotNull(LocalMixPlanner.bestTransition(a, a).automaticSelection)
+        assertEquals(AutoMixSelectionPolicy.AUTOMATIC_LENGTH_FALLBACK, automatic.policy)
+        assertEquals(8, automatic.barCount)
+        assertEquals(null, automatic.musicalCueEvidence)
     }
 
     @Test

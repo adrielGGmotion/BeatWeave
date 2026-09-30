@@ -209,22 +209,20 @@ fun main(args: Array<String>) {
         File(directory, "automatic-beat-overlap.txt")
             .writeText("DECLINE ${failure.code}\n${failure.coverage}\n${failure.clockReport}\n")
     }
-    val plans = linkedMapOf<Int, LocalMixPlan>()
     File(directory, "automatic-choices.txt").printWriter().use { out ->
         for (bars in TransitionPlanner.supportedBarCounts) {
             try {
                 val plan =
                     AutoMixPlanner.transition(songs[0], songs[1], bars, outputSampleRate = autoRate)
-                plans[bars] = plan
                 out.println("bars=$bars ACCEPT ${plan.automaticSelection}")
             } catch (failure: AutoMixPlanningException) {
                 out.println("bars=$bars DECLINE ${failure.report}")
             }
         }
     }
-    // The demonstration explicitly asks for 16 bars; it never substitutes a shorter mix silently.
     val transition =
-        plans[16] ?: error("No safe automatic 16-bar transition; inspect automatic-choices.txt")
+        AutoMixPlanner.bestTransition(songs[0], songs[1], outputSampleRate = autoRate)
+    val selectedBars = checkNotNull(transition.automaticSelection).barCount
     val plan = transition.mixPlan
     File(directory, "automatic-selection.txt").writeText(transition.automaticSelection.toString())
     writeClockAudit(directory, "transition", transition.clockFit)
@@ -276,7 +274,7 @@ fun main(args: Array<String>) {
                     .writeText(
                         """
               {"automatic":true,"manual_bpm_or_cue_overrides":false,"sample_rate":$autoRate,
-               "timeline_origin_frame":$origin,"bars":16,"fade_start_seconds":${plan.startSeconds},
+               "timeline_origin_frame":$origin,"bars":$selectedBars,"fade_start_seconds":${plan.startSeconds},
                "fade_end_seconds":${plan.fadeEndSeconds},"excerpt_start_frame":$from,"excerpt_end_frame":$to,
                "excerpt_duration_seconds":${(to-from)/autoRate.toDouble()},"pitch_scale":1.0,
                "unscaled_peak":${meter.peak},"export_gain":${meter.gain},"clipped_samples":${sink.clipped}}
@@ -291,6 +289,6 @@ fun main(args: Array<String>) {
     check(cache.listFiles().orEmpty().isEmpty())
     cache.delete()
     println(
-        "Automatic 16-bar transition rendered with ${transition.barMatches.size} matched boundaries"
+        "Automatic $selectedBars-bar transition rendered with ${transition.barMatches.size} matched boundaries"
     )
 }
