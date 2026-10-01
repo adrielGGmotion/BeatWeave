@@ -1,6 +1,8 @@
 package org.metrolist.beatweave.learned
 
+import kotlin.math.abs
 import kotlin.math.ceil
+import kotlin.math.ln
 import kotlin.math.max
 import kotlin.math.min
 import org.metrolist.beatweave.Analysis
@@ -14,6 +16,10 @@ data class MusicalCueEvidence(
     val incomingBuild: Double,
     val lengthPreference: Double,
     val score: Double,
+    /** Agreement of global, approximate song features; zero when evidence is inconclusive. */
+    val longBlendAffinity: Double = 0.0,
+    /** Similarity of measured levels at corresponding positions within this overlap. */
+    val overlapLevelBalance: Double = 0.0,
 )
 
 /** Ranks timing-safe bar ranges using changes in energy and onset activity on the source clock. */
@@ -22,8 +28,16 @@ internal class MusicalCueRanking(first: Analysis, second: Analysis) {
     private val incoming = Timeline(second)
 
     val available = outgoing.available && incoming.available
+    private val longBlendAffinity = affinity(first, second)
 
-    data class Part(val score: Double, val startChange: Double, val endChange: Double, val build: Double)
+    data class Part(
+        val score: Double,
+        val startChange: Double,
+        val endChange: Double,
+        val build: Double,
+        val from: Double,
+        val to: Double,
+    )
 
     fun outgoing(grid: BarGrid, start: Int, bars: Int): Part {
         val from = grid.beats.at(grid.boundary(start))
@@ -37,7 +51,7 @@ internal class MusicalCueRanking(first: Analysis, second: Analysis) {
         val score =
             1.2 * max(0.0, -entry) + 0.45 * max(0.0, -exit) +
                 1.1 * late + 0.15 * outgoing.quiet(to)
-        return Part(score, entry, exit, 0.0)
+        return Part(score, entry, exit, 0.0, from, to)
     }
 
     fun incoming(grid: BarGrid, start: Int, bars: Int): Part {
@@ -52,11 +66,36 @@ internal class MusicalCueRanking(first: Analysis, second: Analysis) {
         val score =
             2.0 * max(0.0, exit) + 0.65 * max(0.0, entry) +
                 0.45 * build + 0.25 * incoming.quiet(from) + 0.25 * early
-        return Part(score, entry, exit, build)
+        return Part(score, entry, exit, build, from, to)
     }
 
     fun evidence(out: Part, into: Part, bars: Int): MusicalCueEvidence {
-        val length = lengthPreference(bars)
+        val balance =
+            if (available) {
+                val difference =
+                    (0 until 8).sumOf { i ->
+                        val position = (i + 0.5) / 8.0
+                        abs(
+                            outgoing.level(out.from + (out.to - out.from) * position) -
+                                incoming.level(into.from + (into.to - into.from) * position)
+                        )
+                    } / 8.0
+                (1.0 - difference / 6.0).coerceIn(0.0, 1.0)
+            } else 0.0
+        // An extended blend can carry two similar arrangements through several phrases. A short
+        // fade benefits more from a decisive entry/exit lift. Avoid rewarding a long fade into a
+        // section that is audibly winding down, even if the two levels happen to match.
+        val incomingHolds = into.endChange >= -0.02 && into.build >= -0.20
+        val longBonus =
+            if (incomingHolds)
+                when (bars) {
+                    8 -> 1.0
+                    16 -> 5.5
+                    32 -> 3.0
+                    else -> 0.0
+                } * longBlendAffinity * balance
+            else 0.0
+        val length = lengthPreference(bars) + longBonus
         return MusicalCueEvidence(
             incomingEndLift = into.endChange,
             incomingStartLift = into.startChange,
@@ -64,7 +103,32 @@ internal class MusicalCueRanking(first: Analysis, second: Analysis) {
             incomingBuild = into.build,
             lengthPreference = length,
             score = out.score + into.score + length,
+            longBlendAffinity = longBlendAffinity,
+            overlapLevelBalance = balance,
         )
+    }
+
+    private fun affinity(first: Analysis, second: Analysis): Double {
+        if (!available || first.keyEstimate == "unknown" ||
+            first.keyEstimate != second.keyEstimate ||
+            !first.keyConfidence.isFinite() || !second.keyConfidence.isFinite() ||
+            min(first.keyConfidence, second.keyConfidence) < 0.12 ||
+            !first.bpm.isFinite() || !second.bpm.isFinite() ||
+            first.bpm <= 0 || second.bpm <= 0 ||
+            !first.spectralCentroidHz.isFinite() || !second.spectralCentroidHz.isFinite() ||
+            first.spectralCentroidHz <= 0 || second.spectralCentroidHz <= 0 ||
+            !first.rmsDb.isFinite() || !second.rmsDb.isFinite()
+        ) return 0.0
+        val tempo = (1.0 - abs(ln(first.bpm / second.bpm)) / ln(1.04)).coerceIn(0.0, 1.0)
+        val timbre =
+            (1.0 - abs(ln(first.spectralCentroidHz / second.spectralCentroidHz)) / ln(1.25))
+                .coerceIn(0.0, 1.0)
+        val loudness = (1.0 - abs(first.rmsDb - second.rmsDb) / 6.0).coerceIn(0.0, 1.0)
+        // Global chroma labels are fallible. Require independent tempo, timbre and loudness
+        // agreement before they can influence the fade length.
+        if (tempo < 0.8 || timbre < 0.5 || loudness < 0.5) return 0.0
+        val key = (min(first.keyConfidence, second.keyConfidence) / 0.16).coerceIn(0.0, 1.0)
+        return 0.30 * key + 0.25 * tempo + 0.25 * timbre + 0.20 * loudness
     }
 
     companion object {

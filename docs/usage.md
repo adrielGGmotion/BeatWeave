@@ -72,15 +72,21 @@ val overlap = LocalMixPlanner.overlap(firstAnalysis, secondAnalysis)
 
 In the current source checkout, `bestTransition` ranks timing-safe candidates
 across **2, 4, 8, 16 and 32 bars**. It uses measured energy and onset changes to
-favor an incoming lift and an outgoing release. `autoTransition` ranks cues at
-its requested length (16 by default); it does not silently shorten the fade.
+favor an incoming lift and an outgoing release. When the global key estimate,
+tempo, spectral centroid and loudness agree, it also rewards longer spans whose
+measured levels stay balanced through the candidate overlap. This can select a
+16-bar blend for compatible recordings while keeping the clock and bar checks.
+`autoTransition` ranks cues at its requested length (16 by default); it does not
+silently shorten the fade.
 Caller-assembled analyses without energy features use the earlier earliest-incoming,
 latest-outgoing policy for fixed lengths. The released 0.10.0 artifacts still use
 the earlier policy and a default of 16 bars.
 
 These relative audio features do not identify a chorus, drop, phrase or vocal
-part. `automaticSelection.musicalCueEvidence` reports the measured cue score when
-available; `automaticSelection.policy` indicates the fallback. Explicit bar indices are
+part. Global key estimates can also be wrong; matching labels do not prove that
+two passages are harmonically compatible. `automaticSelection.musicalCueEvidence`
+reports the measured cue score and long-blend inputs when available;
+`automaticSelection.policy` indicates the fallback. Explicit bar indices are
 zero-based. Every corresponding bar must contain the same number of canonical
 pulses, including any matched meter changes.
 

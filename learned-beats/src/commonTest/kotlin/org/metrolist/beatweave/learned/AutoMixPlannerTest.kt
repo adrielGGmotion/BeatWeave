@@ -146,6 +146,61 @@ class AutoMixPlannerTest {
     }
 
     @Test
+    fun similarSongsWithBalancedOverlapsCanSelectSixteenBarsAutomatically() {
+        fun compatibleSong(): LocalSongAnalysis {
+            val measured = withBarEnergy(song(List(40) { 4 }), List(40) { -12.0 })
+            return measured.copy(
+                audio = measured.audio.copy(keyEstimate = "F major", keyConfidence = 0.2)
+            )
+        }
+        val selected =
+            assertNotNull(LocalMixPlanner.bestTransition(compatibleSong(), compatibleSong()).automaticSelection)
+        assertEquals(16, selected.barCount)
+        val evidence = assertNotNull(selected.musicalCueEvidence)
+        assertTrue(evidence.longBlendAffinity > 0.9)
+        assertTrue(evidence.overlapLevelBalance > 0.9)
+    }
+
+    @Test
+    fun aMatchingTempoAloneDoesNotTriggerAnExtendedBlend() {
+        val first = withBarEnergy(song(List(40) { 4 }), List(40) { -12.0 })
+        val second = withBarEnergy(song(List(40) { 4 }), List(40) { -20.0 })
+        val matchingKeys =
+            first.copy(audio = first.audio.copy(keyEstimate = "F major", keyConfidence = 0.2))
+        val differentKey =
+            first.copy(audio = first.audio.copy(keyEstimate = "G major", keyConfidence = 0.2))
+        val poorBalance =
+            second.copy(audio = second.audio.copy(keyEstimate = "F major", keyConfidence = 0.2))
+
+        for (incoming in listOf(differentKey, poorBalance)) {
+            val selection =
+                assertNotNull(LocalMixPlanner.bestTransition(matchingKeys, incoming).automaticSelection)
+            assertTrue(selection.barCount < 16)
+            val evidence = assertNotNull(selection.musicalCueEvidence)
+            if (incoming === differentKey) assertEquals(0.0, evidence.longBlendAffinity)
+            else assertEquals(0.0, evidence.overlapLevelBalance)
+        }
+    }
+
+    @Test
+    fun longBlendBonusDoesNotRewardAnIncomingSectionThatWindsDown() {
+        val measured = withBarEnergy(song(List(40) { 4 }), List(40) { -12.0 })
+        val audio = measured.audio.copy(keyEstimate = "F major", keyConfidence = 0.2)
+        val ranking = MusicalCueRanking(audio, audio)
+        val grid = measured.barTracking!!.grid()
+        val outgoing = ranking.outgoing(grid, 20, 16)
+        val incoming = ranking.incoming(grid, 0, 16)
+        val steady = ranking.evidence(outgoing, incoming, 16)
+        val fading = ranking.evidence(
+            outgoing,
+            incoming.copy(endChange = -0.1, build = -0.4),
+            16,
+        )
+        assertTrue(steady.lengthPreference > 0.15)
+        assertEquals(0.15, fading.lengthPreference)
+    }
+
+    @Test
     fun earlyBreakDoesNotDiscardMostOfTheOutgoingSong() {
         val outgoing =
             withBarEnergy(
