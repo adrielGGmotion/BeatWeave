@@ -349,6 +349,16 @@ class BeatMixer(private val engine: PitchStretchEngine? = null) {
         plan: MixPlan,
         isCancelled: () -> Boolean = { false },
         progress: (Double) -> Unit = {},
+    ): PreparedMix = prepare(first, second, plan, PitchShift.None, isCancelled, progress)
+
+    /** Shift the incoming stem in the same processing pass as its beat-clock warp. */
+    fun prepare(
+        first: StereoPcm,
+        second: StereoPcm,
+        plan: MixPlan,
+        incomingPitchShift: PitchShift,
+        isCancelled: () -> Boolean = { false },
+        progress: (Double) -> Unit = {},
     ): PreparedMix {
         require(
             first.durationSeconds.isFinite() &&
@@ -357,8 +367,12 @@ class BeatMixer(private val engine: PitchStretchEngine? = null) {
         )
         if (isCancelled()) throw MixCancelledException()
         val schedule = WarpSchedule.from(plan, second.durationSeconds)
+        val reportProgress: (Double) -> Unit = {
+            if (isCancelled()) throw MixCancelledException()
+            progress(it.coerceIn(0.0, 1.0))
+        }
         val prepared =
-            if (schedule.isTranslationOnly)
+            if (schedule.isTranslationOnly && incomingPitchShift.isIdentity)
                 object : PreparedStereoPcm {
                     override val durationSeconds =
                         schedule.outputFrames.toDouble() / schedule.sampleRate
@@ -371,11 +385,12 @@ class BeatMixer(private val engine: PitchStretchEngine? = null) {
 
                     override fun close() = Unit // The caller owns the original source.
                 }
+            else if (!incomingPitchShift.isIdentity)
+                (engine as? PitchShiftEngine ?: throw MissingPitchShiftEngineException())
+                    .prepare(second, schedule, incomingPitchShift, reportProgress)
             else
-                (engine ?: throw MissingPitchStretchEngineException()).prepare(second, schedule) {
-                    if (isCancelled()) throw MixCancelledException()
-                    progress(it.coerceIn(0.0, 1.0))
-                }
+                (engine ?: throw MissingPitchStretchEngineException())
+                    .prepare(second, schedule, reportProgress)
         try {
             require(
                 prepared.durationSeconds.isFinite() &&
@@ -388,7 +403,7 @@ class BeatMixer(private val engine: PitchStretchEngine? = null) {
             progress(1.0)
             return PreparedMix(first, prepared, plan, schedule, isCancelled)
         } catch (failure: Throwable) {
-            prepared.close()
+            closeAfterFailure(failure) { prepared.close() }
             throw failure
         }
     }
@@ -400,12 +415,21 @@ class BeatMixer(private val engine: PitchStretchEngine? = null) {
         sink: PcmSink,
         mode: MixMode = MixMode.TRANSITION,
         progress: (Double) -> Unit = {},
+    ) = render(first, second, plan, PitchShift.None, sink, mode, progress)
+
+    fun render(
+        first: StereoPcm,
+        second: StereoPcm,
+        plan: MixPlan,
+        incomingPitchShift: PitchShift,
+        sink: PcmSink,
+        mode: MixMode = MixMode.TRANSITION,
+        progress: (Double) -> Unit = {},
     ) {
-        val prepared = prepare(first, second, plan, progress = { progress(it * 0.9) })
-        try {
+        val prepared =
+            prepare(first, second, plan, incomingPitchShift, progress = { progress(it * 0.9) })
+        prepared.use {
             prepared.render(sink, mode) { progress(0.9 + it * 0.1) }
-        } finally {
-            prepared.close()
         }
     }
 
@@ -419,13 +443,27 @@ class BeatMixer(private val engine: PitchStretchEngine? = null) {
         toSeconds: Double,
         mode: MixMode = MixMode.TRANSITION,
         progress: (Double) -> Unit = {},
+    ) =
+        renderRange(
+            first, second, plan, PitchShift.None, sink, fromSeconds, toSeconds, mode, progress,
+        )
+
+    fun renderRange(
+        first: StereoPcm,
+        second: StereoPcm,
+        plan: MixPlan,
+        incomingPitchShift: PitchShift,
+        sink: PcmSink,
+        fromSeconds: Double,
+        toSeconds: Double,
+        mode: MixMode = MixMode.TRANSITION,
+        progress: (Double) -> Unit = {},
     ) {
         requireRange(fromSeconds, toSeconds)
-        val prepared = prepare(first, second, plan, progress = { progress(it * 0.9) })
-        try {
+        val prepared =
+            prepare(first, second, plan, incomingPitchShift, progress = { progress(it * 0.9) })
+        prepared.use {
             prepared.renderRange(sink, fromSeconds, toSeconds, mode) { progress(0.9 + it * 0.1) }
-        } finally {
-            prepared.close()
         }
     }
 }
@@ -526,9 +564,9 @@ internal constructor(
     ) {
         checkOpen()
         require(
-            fromFrame >= -4L * 60 * 60 * rate &&
+            fromFrame >= MIN_MIX_SECONDS.toLong() * rate &&
                 toFrame > fromFrame &&
-                toFrame <= 4L * 60 * 60 * rate
+                toFrame <= MAX_MIX_SECONDS.toLong() * rate
         )
         val total = toFrame - fromFrame
         var written = 0L
@@ -570,7 +608,7 @@ internal constructor(
     fun readIncoming(outputFrame: Long, frames: Int): FloatArray {
         checkOpen()
         require(frames in 0..65536)
-        require(outputFrame in (-4L * 60 * 60 * rate)..(4L * 60 * 60 * rate)) {
+        require(outputFrame in (MIN_MIX_SECONDS.toLong() * rate)..(MAX_MIX_SECONDS.toLong() * rate)) {
             "Incoming read is outside the supported timeline"
         }
         if (isCancelled()) throw MixCancelledException()
@@ -587,13 +625,17 @@ internal constructor(
     private fun checkOpen() = check(!closed) { "Prepared mix is closed" }
 }
 
+// A four-hour prepared stem may begin up to four hours after outgoing frame zero.
+private const val MIN_MIX_SECONDS = -4 * 60 * 60
+private const val MAX_MIX_SECONDS = 8 * 60 * 60
+
 private fun requireRange(fromSeconds: Double, toSeconds: Double) {
     require(
         fromSeconds.isFinite() &&
             toSeconds.isFinite() &&
             fromSeconds >= 0 &&
             toSeconds > fromSeconds &&
-            toSeconds <= 4 * 60 * 60
+            toSeconds <= MAX_MIX_SECONDS
     ) {
         "Invalid mix time range"
     }
@@ -604,4 +646,23 @@ private fun checkedRead(source: StereoPcm, start: Long, frames: Int, rate: Int):
     require(result.size == frames * 2) { "StereoPcm.read must return exactly frames * 2 samples" }
     require(result.all { it.isFinite() }) { "StereoPcm returned a non-finite sample" }
     return result
+}
+
+private inline fun PreparedMix.use(block: () -> Unit) {
+    try {
+        block()
+    } catch (failure: Throwable) {
+        closeAfterFailure(failure) { close() }
+        throw failure
+    }
+    close()
+}
+
+/** Cleanup must not replace a decoder, sink or cancellation error. */
+private inline fun closeAfterFailure(failure: Throwable, close: () -> Unit) {
+    try {
+        close()
+    } catch (cleanupFailure: Throwable) {
+        if (cleanupFailure !== failure) failure.addSuppressed(cleanupFailure)
+    }
 }

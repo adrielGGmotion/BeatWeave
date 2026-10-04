@@ -48,6 +48,81 @@ Cache analyses by recording/decoding identity, complete model identity and libra
 analysis-policy version. Recompute 0.9 analyses for 0.10, including their bar and
 region checks; unchanged raw timestamps do not imply unchanged eligibility.
 
+## Analyze pitch (unreleased source API)
+
+```kotlin
+import org.metrolist.beatweave.PitchAnalyzer
+
+val pitches = PitchAnalyzer().analyze(monoPcm, sampleRate, checkCancelled)
+val voiced = pitches.frames.filter { it.isVoiced }
+// Each voiced frame exposes frequencyHz, midiNote, noteName, cents and confidence.
+```
+
+Pitch analysis uses FFT-accelerated YIN and runs independently of beat/key analysis.
+It estimates the fundamental frequency of isolated voices or instruments; a full
+mix can produce octave errors or ambiguous results. It does not extract a lead
+melody or transcribe chords. Confidence measures periodicity, not musical accuracy.
+Unvoiced windows have a null frequency and note. Notes use A4 = 440 Hz and cents
+relative to the nearest equal-tempered note.
+Estimates within one cent of a configured frequency endpoint are clamped to that
+endpoint to avoid rejecting a boundary tone due to interpolation error.
+
+The default range is 50–2000 Hz, with 20 ms hops and a window of at least 80 ms.
+`PitchAnalysisOptions` configures the range, window, hop and silence threshold.
+The analysis rate must provide at least five samples per period at the maximum
+configured frequency; the default range therefore needs a rate of at least 10 kHz.
+Only complete windows are analyzed, and timestamps identify window centers on
+the original audio clock. The `StereoPcm` overload reads bounded windows, choosing
+the stronger channel to avoid cancellation in antiphase stereo. The host supplies
+band-limited resampling when the requested analysis rate differs from the source.
+
+## Shift pitch (unreleased source API)
+
+```kotlin
+import org.metrolist.beatweave.PitchShift
+import org.metrolist.beatweave.rubberband.RubberBandEngine
+
+val shifted = RubberBandEngine(cacheDirectory).preparePitchShift(
+    stereoPcm, sampleRate = 48000,
+    pitchShift = PitchShift(semitones = 2.0, preserveFormants = true),
+    progress = reportProgress,
+)
+try {
+    val block = shifted.readFrames(0L, 4096, 48000)
+    // Reuse the prepared audio for playback, seeking or export.
+} finally {
+    shifted.close()
+}
+```
+
+Positive semitones raise pitch; negative values lower it. Fractional values permit
+fine tuning (0.01 semitones = one cent). Shifts are limited to ±24 semitones.
+Pitch-only processing retains the original frame count at the requested rate.
+Nonzero Rubber Band shifts require at least 100 ms of source and output audio;
+shorter input fails explicitly. The decoded PCM rate must be 8000–192000 Hz.
+Formant preservation is enabled by default to retain the original spectral
+envelope, especially for vocals; it can be disabled for deliberate transposition
+of that envelope. The backend uses offline R3, two passes and linked stereo.
+Zero pitch and unchanged duration bypass DSP and retain the original PCM exactly.
+Nonzero shifting is not lossless; large shifts and complex material can introduce
+audible artifacts. This API does not add lossy encoding or limiting.
+
+To combine incoming pitch and beat matching in one preparation, pass the shift
+to the checked planner's preparation method:
+
+```kotlin
+val session = transition.prepare(
+    firstStereoPcm, secondStereoPcm, RubberBandEngine(cacheDirectory),
+    incomingPitchShift = PitchShift(-1.0),
+    isCancelled = isCancelled, progress = reportProgress,
+)
+```
+
+Existing mixer calls preserve pitch. A nonzero shift requires `PitchShiftEngine`;
+an engine implementing only time stretching fails explicitly. Pitch is constant
+through the incoming recording; pitch automation and automatic key matching are
+not implemented. Both APIs above are source additions and are absent from 0.10.0.
+
 ## Choose a mix
 
 ```kotlin
@@ -77,11 +152,13 @@ tempo, spectral centroid and loudness agree, it also rewards longer spans whose
 measured levels stay balanced through the candidate overlap. This can select a
 16-bar blend for compatible recordings while keeping the clock and bar checks.
 `autoTransition` ranks cues at its requested length (16 by default); it does not
-silently shorten the fade. If the shortlisted cues yield no accepted plan, a
-fixed-length request retries the earlier earliest-incoming, latest-outgoing scan
-within the remaining candidate-pair and clock-fit budgets. This can recover a
-compatible meter sequence omitted by the shortlist without relaxing any timing
-checks. Automatic length selection remains bounded to its ranked shortlist.
+silently shorten the fade. If the shortlisted cues yield no accepted plan, the
+planner retries the earlier earliest-incoming, latest-outgoing scan within the
+remaining candidate-pair and clock-fit budgets. Fixed-length requests retain
+their exact length; automatic requests retry 8, 4, 16, 2 and 32 bars in that
+conservative order. This can recover a compatible meter sequence omitted by the
+shortlist without relaxing any timing checks. A budget exhausted during either
+scan is reported as `SEARCH_LIMIT_REACHED`.
 Caller-assembled analyses without energy features use the earlier earliest-incoming,
 latest-outgoing policy for fixed lengths. The released 0.10.0 artifacts still use
 the earlier policy and a default of 16 bars.
@@ -93,6 +170,14 @@ reports the measured cue score and long-blend inputs when available;
 `automaticSelection.policy` indicates the fallback. Explicit bar indices are
 zero-based. Every corresponding bar must contain the same number of canonical
 pulses, including any matched meter changes.
+
+For `LocalMixPlanner` and `AutoMixPlanner` bar operations,
+`ClockFitOptions.pinnedIncomingBeats` uses original incoming `pulse.beats` indices.
+An explicit selection must contain every requested pin; automatic searches select
+a supported range containing them. The planner remaps those indices onto its
+cropped clock and keeps the corresponding source timestamps fixed. The low-level
+`BeatClockRegularizer.regularize` API instead accepts indices of the grid passed
+directly to it.
 
 `overlap` selects the longest supported common bar sequence by outgoing duration.
 Both complete recordings remain in the output. Only the selected common span is
@@ -151,8 +236,8 @@ The inputs above are host-owned. `isCancelled` is `() -> Boolean`,
 the plan's output sample rate and interleaved stereo float PCM.
 
 Preparation runs off the UI and audio callback threads. Rubber Band snapshots
-the source and stores prepared output on disk, with pitch ratio fixed at 1.0
-and linked stereo channels. It processes one continuous stream rather than
+the source and stores prepared output on disk, preserving pitch by default
+and linking stereo channels. It processes one continuous stream rather than
 restarting at each beat. Provide enough temporary disk space and handle failure
 before replacing an existing playable session.
 

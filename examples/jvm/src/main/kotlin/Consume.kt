@@ -95,8 +95,10 @@ private fun declaration(song: LocalSongAnalysis, stride: Int) =
         "four-observed-main-beats",
     )
 
-private class Tone(private val frequency: Double) : StereoPcm {
-    override val durationSeconds = 32.5
+private class Tone(
+    private val frequency: Double,
+    override val durationSeconds: Double = 32.5,
+) : StereoPcm {
 
     override fun read(startSeconds: Double, frames: Int, outputSampleRate: Int) =
         readFrames((startSeconds * outputSampleRate).roundToLong(), frames, outputSampleRate)
@@ -123,6 +125,27 @@ private class CountingSink : PcmSink {
         framesWritten += frames
         peak = max(peak, interleavedStereo.maxOf { abs(it) })
     }
+}
+
+private fun pitchSmoke(engine: RubberBandEngine) {
+    val source = Tone(440.0, durationSeconds = 2.0)
+    val analyzer = PitchAnalyzer(PitchAnalysisOptions(hopSeconds = 0.1))
+    val original = analyzer.analyze(source, analysisSampleRate = RATE)
+    check(original.frames.isNotEmpty() && original.frames.all {
+        it.frequencyHz?.let { frequency -> abs(frequency - 440.0) < 2.0 } == true
+    })
+    val shifted = engine.preparePitchShift(source, RATE, PitchShift(12.0, preserveFormants = false))
+    try {
+        check(shifted.durationSeconds == source.durationSeconds)
+        val stereo = shifted.readFrames(RATE / 2L, RATE / 2, RATE)
+        val pitch = analyzer.analyze(FloatArray(stereo.size / 2) { stereo[it * 2] }, RATE)
+        check(pitch.frames.isNotEmpty() && pitch.frames.all {
+            it.frequencyHz?.let { frequency -> abs(frequency - 880.0) < 2.0 } == true
+        }) { "Published native pitch shift did not produce A5" }
+    } finally {
+        shifted.close()
+    }
+    println("PASS published pitch analysis and native +12-semitone shift: A4 to A5, unchanged duration")
 }
 
 fun main(args: Array<String>) {
@@ -180,6 +203,8 @@ fun main(args: Array<String>) {
     )
     val cache = File(args[1]).also { it.mkdirs() }
     check(cache.listFiles().orEmpty().isEmpty())
+    pitchSmoke(RubberBandEngine(cache))
+    check(cache.listFiles().orEmpty().isEmpty())
     val session = preparedPlan.prepare(Tone(220.0), Tone(440.0), RubberBandEngine(cache))
     try {
         check(session.startFrame(MixMode.OVERLAP) < 0)
@@ -197,13 +222,17 @@ fun main(args: Array<String>) {
         session.close()
         session.close()
     }
-    val transitionSession = transition.prepare(Tone(220.0), Tone(440.0), RubberBandEngine(cache))
+    val transitionSession =
+        transition.prepare(
+            Tone(220.0), Tone(440.0), RubberBandEngine(cache),
+            incomingPitchShift = PitchShift(7.0, preserveFormants = false),
+        )
     try {
         val sink = CountingSink()
         transitionSession.renderComplete(sink, transition.mode)
         check(sink.framesWritten == transitionSession.frameCount(transition.mode))
         check(sink.peak > 0.05 && sink.peak < 1f)
-        println("PASS prepared automatic transition render: ${sink.framesWritten} frames")
+        println("PASS prepared automatic transition render with +7-semitone incoming pitch: ${sink.framesWritten} frames")
     } finally {
         transitionSession.close()
     }

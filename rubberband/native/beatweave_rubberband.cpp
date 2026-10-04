@@ -19,13 +19,19 @@ struct bw_rb_session {
     bool study_done = false, process_done = false;
     std::vector<std::vector<float>> planar;
     std::vector<float *> pointers;
-    bw_rb_session(int rate, int ch, int64_t source, int64_t output) :
+    bw_rb_session(int rate, int ch, int64_t source, int64_t output, double pitch_scale, bool preserve_formants) :
         channels(ch), expected(source), target(output), planar(ch, std::vector<float>(4096)), pointers(ch) {
-        const int flags = RubberBandStretcher::OptionProcessOffline |
+        int flags = RubberBandStretcher::OptionProcessOffline |
             RubberBandStretcher::OptionEngineFiner |
             RubberBandStretcher::OptionChannelsTogether |
             RubberBandStretcher::OptionThreadingNever;
-        rb.reset(new RubberBandStretcher(rate, ch, flags, double(output) / double(source), 1.0));
+        if (pitch_scale != 1.0) {
+            // Offline R3 already uses its high-quality fixed-pitch path; the
+            // explicit quality option also documents the chosen policy.
+            flags |= RubberBandStretcher::OptionPitchHighQuality;
+            if (preserve_formants) flags |= RubberBandStretcher::OptionFormantPreserved;
+        }
+        rb.reset(new RubberBandStretcher(rate, ch, flags, double(output) / double(source), pitch_scale));
         if (rb->getEngineVersion() != 3) throw std::runtime_error("Rubber Band R3 engine required");
         rb->setExpectedInputDuration(static_cast<size_t>(source));
         rb->setMaxProcessSize(4096);
@@ -46,13 +52,23 @@ static void deinterleave(bw_rb_session *s, const float *in, int n) {
 #define BW_FAIL(ret) } catch (const std::exception &e) { last_error = e.what(); return ret; } catch (...) { last_error = "Unknown native audio engine failure"; return ret; }
 extern "C" {
 bw_rb_session *bw_rb_create(int rate, int channels, int64_t source, int64_t output) {
+    return bw_rb_create_pitch(rate, channels, source, output, 1.0, 0);
+}
+bw_rb_session *bw_rb_create_pitch(int rate, int channels, int64_t source, int64_t output,
+                                  double pitch_scale, int preserve_formants) {
     BW_TRY
     if (rate < 8000 || rate > 192000 || channels != 2 || source <= 0 || output <= 0 ||
         uint64_t(source) > std::numeric_limits<size_t>::max() || uint64_t(output) > std::numeric_limits<size_t>::max())
         throw std::invalid_argument("Invalid stereo stretch dimensions");
     if (double(output) / source < 0.25 || double(output) / source > 4.0)
         throw std::invalid_argument("Stretch ratio outside supported 0.25..4.0 range");
-    return new bw_rb_session(rate, channels, source, output);
+    if (!std::isfinite(pitch_scale) || pitch_scale < 0.25 || pitch_scale > 4.0)
+        throw std::invalid_argument("Pitch ratio outside supported 0.25..4.0 range");
+    if (pitch_scale != 1.0 && (source < (rate + 9) / 10 || output < (rate + 9) / 10))
+        throw std::invalid_argument("Pitch shifting requires at least 100 ms of source and output audio");
+    if (preserve_formants != 0 && preserve_formants != 1)
+        throw std::invalid_argument("Invalid formant preservation flag");
+    return new bw_rb_session(rate, channels, source, output, pitch_scale, preserve_formants != 0);
     BW_FAIL(nullptr)
 }
 void bw_rb_destroy(bw_rb_session *s) { delete s; }
@@ -87,9 +103,9 @@ int bw_rb_study(bw_rb_session *s, const float *in, int n, int final_block) {
     BW_TRY
     require_session(s);
     if (s->study_done || s->processed) throw std::logic_error("Study pass already finished");
-    if (s->studied + n > s->expected || (final_block && s->studied + n != s->expected))
-        throw std::invalid_argument("Study pass length differs from declared source length");
     deinterleave(s, in, n);
+    if (n > s->expected - s->studied || (final_block && n != s->expected - s->studied))
+        throw std::invalid_argument("Study pass length differs from declared source length");
     s->rb->study(s->pointers.data(), n, final_block != 0);
     s->studied += n;
     s->study_done = final_block != 0;
@@ -100,9 +116,9 @@ int bw_rb_process(bw_rb_session *s, const float *in, int n, int final_block) {
     BW_TRY
     require_session(s);
     if (!s->study_done || s->process_done) throw std::logic_error("Process needs completed study and open process pass");
-    if (s->processed + n > s->expected || (final_block && s->processed + n != s->expected))
-        throw std::invalid_argument("Process pass length differs from declared source length");
     deinterleave(s, in, n);
+    if (n > s->expected - s->processed || (final_block && n != s->expected - s->processed))
+        throw std::invalid_argument("Process pass length differs from declared source length");
     s->rb->process(s->pointers.data(), n, final_block != 0);
     s->processed += n;
     s->process_done = final_block != 0;

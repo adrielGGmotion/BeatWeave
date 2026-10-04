@@ -46,6 +46,14 @@ internal object RubberBandBridge {
 
     external fun create(sampleRate: Int, sourceFrames: Long, outputFrames: Long): Long
 
+    external fun createWithPitch(
+        sampleRate: Int,
+        sourceFrames: Long,
+        outputFrames: Long,
+        pitchRatio: Double,
+        preserveFormants: Boolean,
+    ): Long
+
     external fun destroy(handle: Long)
 
     external fun engineVersion(handle: Long): Int

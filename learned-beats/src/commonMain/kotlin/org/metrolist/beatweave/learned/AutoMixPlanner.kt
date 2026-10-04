@@ -160,6 +160,9 @@ object AutoMixPlanner {
             "Choose 2, 4, 8, 16 or 32 bars"
         }
         require(outputSampleRate in 22050..96000)
+        require(fitOptions.pinnedIncomingBeats.all { it in second.pulse.beats.indices }) {
+            "Pinned beat lies outside the original incoming canonical grid"
+        }
         val search = Search(MixMode.TRANSITION, bars, searchOptions, isCancelled)
         val a = supported(first, AutoMixTrackRole.OUTGOING, search)
         val b = supported(second, AutoMixTrackRole.INCOMING, search)
@@ -181,30 +184,38 @@ object AutoMixPlanner {
         second: LocalSongAnalysis,
         a: SupportedBars,
         b: SupportedBars,
-        bars: Int,
+        bars: Int?,
         outputSampleRate: Int,
         fitOptions: ClockFitOptions,
         qualityLimits: WarpQualityLimits,
         search: Search,
     ): LocalMixPlan {
         search.strategy = AutoMixSearchStrategy.ORDERED_TRANSITION_SCAN
-        for (incoming in 0 until b.grid.barCount) {
-            if (b.endByStart[incoming] - incoming < bars) continue
-            for (outgoing in a.grid.barCount - bars downTo 0) {
-                search.inspect()
-                if (
-                    a.endByStart[outgoing] - outgoing < bars ||
-                        !sameBars(a.grid, b.grid, outgoing, incoming, bars)
-                ) continue
-                if (a.grid.boundary(outgoing + bars) - a.grid.boundary(outgoing) > 512) continue
-                search.compatible++
-                val result =
-                    tryCandidate(
-                        first, second, a.grid, b.grid, outgoing, incoming, bars,
-                        MixMode.TRANSITION, outputSampleRate, fitOptions, qualityLimits,
-                        search, AutoMixSelectionPolicy.EARLY_INCOMING_LATE_OUTGOING,
-                    )
-                if (result != null) return result
+        // A shortlist can omit the only shared meter sequence. The automatic retry uses the
+        // same conservative length preference as feature-free ranking, retaining both budgets.
+        val lengths = bars?.let(::listOf) ?: listOf(8, 4, 16, 2, 32)
+        for (count in lengths) {
+            for (incoming in 0 until b.grid.barCount) {
+                if (b.endByStart[incoming] - incoming < count) continue
+                if (!containsIncomingPins(b.grid, incoming, count, fitOptions)) continue
+                for (outgoing in a.grid.barCount - count downTo 0) {
+                    search.inspect()
+                    if (
+                        a.endByStart[outgoing] - outgoing < count ||
+                            !sameBars(a.grid, b.grid, outgoing, incoming, count)
+                    ) continue
+                    if (a.grid.boundary(outgoing + count) - a.grid.boundary(outgoing) > 512) continue
+                    search.compatible++
+                    val result =
+                        tryCandidate(
+                            first, second, a.grid, b.grid, outgoing, incoming, count,
+                            MixMode.TRANSITION, outputSampleRate, fitOptions, qualityLimits,
+                            search,
+                            if (bars != null) AutoMixSelectionPolicy.EARLY_INCOMING_LATE_OUTGOING
+                            else AutoMixSelectionPolicy.AUTOMATIC_LENGTH_FALLBACK,
+                        )
+                    if (result != null) return result
+                }
             }
         }
         search.decline()
@@ -242,7 +253,10 @@ object AutoMixPlanner {
             search.checkCancellation()
             fun starts(song: SupportedBars, outgoing: Boolean): List<RankedStart> =
                 (0..song.grid.barCount - bars)
-                    .filter { song.endByStart[it] - it >= bars }
+                    .filter {
+                        song.endByStart[it] - it >= bars &&
+                            (outgoing || containsIncomingPins(song.grid, it, bars, fitOptions))
+                    }
                     .map {
                         RankedStart(
                             it,
@@ -306,13 +320,11 @@ object AutoMixPlanner {
                 )
             if (result != null) return result
         }
-        // Independent top-N lists can omit a compatible meter sequence. For a fixed length,
-        // retry the original ordering using the remaining pair and clock-fit budgets.
-        if (requestedBars != null)
-            return orderedTransition(
-                first, second, a, b, requestedBars, outputSampleRate, fitOptions, qualityLimits, search
-            )
-        search.decline()
+        // Independent top-N lists can omit a compatible meter sequence. Retry supported starts
+        // using the remaining pair and clock-fit budgets, including automatic length selection.
+        return orderedTransition(
+            first, second, a, b, requestedBars, outputSampleRate, fitOptions, qualityLimits, search
+        )
     }
 
     fun overlap(
@@ -325,6 +337,9 @@ object AutoMixPlanner {
         isCancelled: () -> Boolean = { false },
     ): LocalMixPlan {
         require(outputSampleRate in 22050..96000)
+        require(fitOptions.pinnedIncomingBeats.all { it in second.pulse.beats.indices }) {
+            "Pinned beat lies outside the original incoming canonical grid"
+        }
         val search = Search(MixMode.OVERLAP, null, searchOptions, isCancelled)
         val a = supported(first, AutoMixTrackRole.OUTGOING, search)
         val b = supported(second, AutoMixTrackRole.INCOMING, search)
@@ -723,6 +738,9 @@ object AutoMixPlanner {
         val aEnd = a.boundary(outgoing + bars)
         val bStart = b.boundary(incoming)
         val bEnd = b.boundary(incoming + bars)
+        require(fitOptions.pinnedIncomingBeats.all { it in bStart..bEnd }) {
+            "Pinned incoming canonical beat lies outside the selected bar range"
+        }
         val firstGrid = first.matchingGrid(aStart, aEnd + 1)
         val secondGrid = second.matchingGrid(bStart, bEnd + 1)
         require(
@@ -750,8 +768,9 @@ object AutoMixPlanner {
                 releaseAfterFade = mode == MixMode.TRANSITION,
             )
         val boundaryPins = (0..bars).map { b.boundary(incoming + it) - bStart }.toSet()
+        val scopedPins = fitOptions.pinnedIncomingBeats.map { it - bStart }.toSet()
         val pinnedOptions =
-            fitOptions.copy(pinnedIncomingBeats = fitOptions.pinnedIncomingBeats + boundaryPins)
+            fitOptions.copy(pinnedIncomingBeats = scopedPins + boundaryPins)
         val fit =
             BeatClockRegularizer.regularize(
                 plan,
@@ -817,6 +836,7 @@ object AutoMixPlanner {
         policy: AutoMixSelectionPolicy,
         musicalCueEvidence: MusicalCueEvidence? = null,
     ): LocalMixPlan? {
+        if (!containsIncomingPins(b, incoming, bars, fitOptions)) return null
         search.beforeFit()
         val selection =
             AutoMixSelection(
@@ -857,6 +877,16 @@ object AutoMixPlanner {
             null
         }
     }
+
+    private fun containsIncomingPins(
+        incoming: BarGrid,
+        startBar: Int,
+        bars: Int,
+        fitOptions: ClockFitOptions,
+    ): Boolean =
+        fitOptions.pinnedIncomingBeats.all {
+            it in incoming.boundary(startBar)..incoming.boundary(startBar + bars)
+        }
 
     private class Search(
         val mode: MixMode,

@@ -11,7 +11,11 @@ import kotlin.math.roundToLong
 import org.metrolist.beatweave.*
 
 /**
- * Offline Rubber Band 3.3.0 R3, pitch ratio 1.0, channels linked. Preparation snapshots the decoded
+ * Offline Rubber Band 3.3.0 R3, with linked stereo and independent pitch/tempo control.
+ * Nonzero shifts use the high-quality offline path with optional formant preservation.
+ * They require at least 100 ms of both source and output audio; zero pitch with
+ * an identity schedule remains bit-exact even for shorter clips.
+ * Preparation snapshots the decoded
  * PCM so the study and render passes see identical audio. Both the source snapshot and output are
  * disk-backed. Call off the UI thread. No fallback to resampling or the former per-window vocoder
  * is permitted.
@@ -20,12 +24,24 @@ import org.metrolist.beatweave.*
  * returned PreparedStereoPcm (or its owning PreparedMix). This optional module is GPL-2.0-or-later;
  * see its COPYING and THIRD_PARTY.md.
  */
-class RubberBandEngine(private val cacheDirectory: File) : PitchStretchEngine {
+class RubberBandEngine(private val cacheDirectory: File) : PitchShiftEngine {
     override fun prepare(
         source: StereoPcm,
         schedule: WarpSchedule,
         progress: (Double) -> Unit,
+    ): PreparedStereoPcm = prepare(source, schedule, PitchShift.None, progress)
+
+    override fun prepare(
+        source: StereoPcm,
+        schedule: WarpSchedule,
+        pitchShift: PitchShift,
+        progress: (Double) -> Unit,
     ): PreparedStereoPcm {
+        require(pitchShift.isIdentity ||
+            (schedule.sourceFrames >= (schedule.sampleRate + 9) / 10 &&
+                schedule.outputFrames >= (schedule.sampleRate + 9) / 10)) {
+            "Pitch shifting requires at least 100 ms of source and output audio"
+        }
         if (!cacheDirectory.isDirectory) cacheDirectory.mkdirs()
         // Another preparation may create the same directory between the two calls.
         require(cacheDirectory.isDirectory) { "Cannot create audio cache directory" }
@@ -41,12 +57,22 @@ class RubberBandEngine(private val cacheDirectory: File) : PitchStretchEngine {
         try {
             // LinkageError is intentional: missing/incompatible native libraries cannot
             // silently select an engine with different timing or pitch behavior.
-            handle =
+            val identity = schedule.isTranslationOnly && pitchShift.isIdentity
+            handle = if (pitchShift.isIdentity) {
                 RubberBandBridge.create(
                     schedule.sampleRate,
                     schedule.sourceFrames,
                     schedule.outputFrames,
                 )
+            } else {
+                RubberBandBridge.createWithPitch(
+                    schedule.sampleRate,
+                    schedule.sourceFrames,
+                    schedule.outputFrames,
+                    pitchShift.ratio,
+                    pitchShift.preserveFormants,
+                )
+            }
             check(handle != 0L && RubberBandBridge.engineVersion(handle) == 3) {
                 "Rubber Band R3 is required"
             }
@@ -79,7 +105,7 @@ class RubberBandEngine(private val cacheDirectory: File) : PitchStretchEngine {
                     for (x in data) io.putFloat(x)
                     io.flip()
                     writeFully(snapshot.channel, io)
-                    if (!schedule.isTranslationOnly)
+                    if (!identity)
                         RubberBandBridge.study(
                             handle,
                             data,
@@ -88,7 +114,7 @@ class RubberBandEngine(private val cacheDirectory: File) : PitchStretchEngine {
                         )
                     frame += count
                 }
-                if (schedule.isTranslationOnly) {
+                if (identity) {
                     // Identity must be bit-for-bit: running an unnecessary STFT can
                     // alter transients even when the requested stretch is exactly one.
                     snapshot.channel.force(false)
@@ -152,7 +178,7 @@ class RubberBandEngine(private val cacheDirectory: File) : PitchStretchEngine {
                     }
                     // Fixed-duration offline processing should be exact. Permit only a
                     // single sample of floating-point rounding, never a missing tail.
-                    check(kotlin.math.abs(nativeFrames - schedule.outputFrames) <= 1L) {
+                    check(nativeFrames > 0L && kotlin.math.abs(nativeFrames - schedule.outputFrames) <= 1L) {
                         "Native duration mismatch: expected ${schedule.outputFrames}, got $nativeFrames frames"
                     }
                     if (writtenFrames < schedule.outputFrames) {

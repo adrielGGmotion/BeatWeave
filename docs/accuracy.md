@@ -82,6 +82,13 @@ accuracy, and rejection does not establish that a transition would sound bad.
 
 ## Practical limits
 
+- The unreleased `PitchAnalyzer` estimates monophonic fundamental frequency; it
+  does not extract a lead melody from a complete mix. Periodicity confidence is
+  not a calibrated accuracy probability, and octave errors remain possible.
+- Nonzero pitch shifting uses offline Rubber Band R3 with linked stereo and
+  optional formant preservation. It is not lossless and can introduce artifacts,
+  especially at large shifts. Synthetic tone and stereo regressions do not
+  establish transparent quality on arbitrary recordings.
 - BPM, key and meter are estimates. Half-time, double-time and downbeat phase can
   remain ambiguous even when a clock is regular.
 - A successful plan passes the implemented evidence and timing checks. It can

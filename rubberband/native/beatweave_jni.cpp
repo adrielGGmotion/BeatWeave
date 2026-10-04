@@ -17,6 +17,12 @@ JNIEXPORT jlong JNICALL Java_org_metrolist_beatweave_rubberband_RubberBandBridge
     if (!s) fail(env);
     return static_cast<jlong>(reinterpret_cast<intptr_t>(s));
 }
+JNIEXPORT jlong JNICALL Java_org_metrolist_beatweave_rubberband_RubberBandBridge_createWithPitch
+  (JNIEnv *env, jobject, jint rate, jlong source, jlong output, jdouble pitchRatio, jboolean preserveFormants) {
+    auto *s = bw_rb_create_pitch(rate, 2, source, output, pitchRatio, preserveFormants ? 1 : 0);
+    if (!s) fail(env);
+    return static_cast<jlong>(reinterpret_cast<intptr_t>(s));
+}
 JNIEXPORT void JNICALL Java_org_metrolist_beatweave_rubberband_RubberBandBridge_destroy
   (JNIEnv *, jobject, jlong h) { bw_rb_destroy(session(h)); }
 JNIEXPORT jint JNICALL Java_org_metrolist_beatweave_rubberband_RubberBandBridge_engineVersion

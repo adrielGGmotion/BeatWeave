@@ -35,7 +35,8 @@ Run the tests that do not need model files:
   :analysis:jvmTest :learned-beats:jvmTest :rubberband:jvmTest
 ```
 
-These tasks run 139 tests, including the native rendering tests. Four ONNX
+These tasks run the model-independent suite, including native rendering and
+pitch-analysis/shifting tests. Four ONNX
 inference tests are a separate task because model files are distributed
 separately from the source. After [setting up both models](models.md), run:
 
@@ -48,7 +49,7 @@ The integration task fails when either model is missing. It is not part of the
 default `check` task. Reports are written under each module's
 `build/reports/tests/` directory.
 
-GitHub Actions runs the 139 model-independent tests and builds the Android/JVM
+GitHub Actions runs the model-independent tests and builds the Android/JVM
 publications. It does not run model inference, musical accuracy benchmarks,
 Android devices, or emulators. A successful CI build therefore establishes
 build and regression-test results, not automatic beat or bar accuracy.
