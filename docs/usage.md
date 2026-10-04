@@ -73,7 +73,8 @@ The analysis rate must provide at least five samples per period at the maximum
 configured frequency; the default range therefore needs a rate of at least 10 kHz.
 Only complete windows are analyzed, and timestamps identify window centers on
 the original audio clock. The `StereoPcm` overload reads bounded windows, choosing
-the stronger channel to avoid cancellation in antiphase stereo. The host supplies
+the channel with greater energy after DC removal to avoid selecting a biased,
+silent channel or cancelling antiphase stereo. The host supplies
 band-limited resampling when the requested analysis rate differs from the source.
 
 ## Shift pitch (unreleased source API)
