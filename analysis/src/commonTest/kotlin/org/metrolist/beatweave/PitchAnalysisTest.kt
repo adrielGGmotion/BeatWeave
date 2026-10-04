@@ -117,6 +117,41 @@ class PitchAnalysisTest {
         assertEquals(mono, analyzer.analyze(source, rate))
     }
 
+    /** DC bias must not hide a stronger pitched channel or promote a weaker competing tone. */
+    @Test
+    fun stereoChannelSelectionIgnoresDcBias() {
+        for (rate in listOf(11025, 48000)) {
+            val strong = tone(440.0, rate)
+            val weak = tone(220.0, rate)
+            for (weakGain in listOf(0.0f, 0.25f)) {
+                for (strongChannel in 0..1) {
+                    val source = object : StereoPcm {
+                        override val durationSeconds = strong.size.toDouble() / rate
+                        override fun read(startSeconds: Double, frames: Int, outputSampleRate: Int) =
+                            readFrames((startSeconds * outputSampleRate).roundToLong(), frames, outputSampleRate)
+
+                        override fun readFrames(startFrame: Long, frames: Int, outputSampleRate: Int): FloatArray {
+                            assertEquals(rate, outputSampleRate)
+                            return FloatArray(frames * 2) {
+                                val index = (startFrame + it / 2).toInt()
+                                if (it % 2 == strongChannel) strong[index]
+                                else 0.6f + weak[index] * weakGain
+                            }
+                        }
+                    }
+                    val stereo = PitchAnalyzer().analyze(source, rate)
+                    assertTrue(stereo.frames.isNotEmpty())
+                    for (frame in stereo.frames) {
+                        val frequency = assertNotNull(frame.frequencyHz,
+                            "DC-biased channel hid the tone at $rate Hz; strong channel $strongChannel")
+                        assertTrue(centsError(frequency, 440.0) < 1.0,
+                            "Selected $frequency Hz with weak gain $weakGain at $rate Hz")
+                    }
+                }
+            }
+        }
+    }
+
     @Test
     fun cancellationInvalidInputsAndDecoderContractRemainExplicit() {
         class Cancelled : RuntimeException()
