@@ -138,6 +138,21 @@ class RubberBandEngineTest {
     }
 
     @Test
+    fun emptyNativeRenderCannotBecomeOnePaddedSample() = withCache { cache ->
+        val tiny = object : StereoPcm {
+            override val durationSeconds = 2.0 / rate
+            override fun read(startSeconds: Double, frames: Int, outputSampleRate: Int) =
+                FloatArray(frames * 2) { 0.25f }
+        }
+        val schedule = WarpSchedule.from(plan(0.5), tiny.durationSeconds)
+        assertEquals(1L, schedule.outputFrames)
+        assertFailsWith<IllegalStateException> {
+            RubberBandEngine(cache).prepare(tiny, schedule) {}
+        }
+        assertTrue(cache.listFiles()!!.isEmpty())
+    }
+
+    @Test
     fun incompatibleSampleRateIsExplicit() = withCache { cache ->
         val source = source()
         val prepared =

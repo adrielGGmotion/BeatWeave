@@ -178,7 +178,7 @@ class RubberBandEngine(private val cacheDirectory: File) : PitchShiftEngine {
                     }
                     // Fixed-duration offline processing should be exact. Permit only a
                     // single sample of floating-point rounding, never a missing tail.
-                    check(kotlin.math.abs(nativeFrames - schedule.outputFrames) <= 1L) {
+                    check(nativeFrames > 0L && kotlin.math.abs(nativeFrames - schedule.outputFrames) <= 1L) {
                         "Native duration mismatch: expected ${schedule.outputFrames}, got $nativeFrames frames"
                     }
                     if (writtenFrames < schedule.outputFrames) {
