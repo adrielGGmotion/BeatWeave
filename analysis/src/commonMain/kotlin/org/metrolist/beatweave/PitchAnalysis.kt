@@ -99,7 +99,8 @@ class PitchAnalyzer(private val options: PitchAnalysisOptions = PitchAnalysisOpt
     /**
      * Analyze a deterministic stereo decoder/cache at [analysisSampleRate]. The source must use
      * a band-limited resampler when rates differ, as required by [StereoPcm]. For each window the
-     * stronger channel is analyzed independently: averaging antiphase stereo can erase a voice.
+     * channel with greater energy after DC removal is analyzed independently: averaging
+     * antiphase stereo can erase a voice, while DC bias must not determine channel selection.
      * A channel change can change the detected instrument; this is not stereo source separation.
      * No decoder or source ownership is transferred.
      */
@@ -126,13 +127,26 @@ class PitchAnalyzer(private val options: PitchAnalysisOptions = PitchAnalysisOpt
         return analyzeWindows(layout, analysisSampleRate, duration, cancellationCheck) { start, window ->
             val stereo = source.readFrames(start, window.size, analysisSampleRate)
             require(stereo.size == window.size * 2) { "Stereo source returned an incorrect frame count" }
-            var leftPower = 0.0
-            var rightPower = 0.0
+            var leftMean = 0.0
+            var rightMean = 0.0
             for (i in window.indices) {
                 if (i % 8192 == 0) cancellationCheck()
                 val left = stereo[i * 2].toDouble()
                 val right = stereo[i * 2 + 1].toDouble()
                 require(left.isFinite() && right.isFinite()) { "PCM must contain only finite samples" }
+                leftMean += left
+                rightMean += right
+            }
+            leftMean /= window.size
+            rightMean /= window.size
+            var leftPower = 0.0
+            var rightPower = 0.0
+            // Match the DC removal used by analyzeWindows before comparing channel energy.
+            // Sum centered squares directly to avoid cancellation in E[x²] - E[x]².
+            for (i in window.indices) {
+                if (i % 8192 == 0) cancellationCheck()
+                val left = stereo[i * 2].toDouble() - leftMean
+                val right = stereo[i * 2 + 1].toDouble() - rightMean
                 leftPower += left * left
                 rightPower += right * right
             }
