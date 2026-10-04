@@ -230,6 +230,12 @@ object AutoMixPlanner {
         val evidence: MusicalCueEvidence,
     )
 
+    /**
+     * Ranks compatible cue pairs and fits collected candidates within the independent fit budget.
+     * Reaching the pair budget stops enumeration without discarding candidates. If none passes,
+     * a truncated scan reports SEARCH_LIMIT_REACHED; a completed scan can retry ordered starts
+     * using the remaining budgets.
+     */
     private fun rankedTransition(
         first: LocalSongAnalysis,
         second: LocalSongAnalysis,
@@ -249,8 +255,10 @@ object AutoMixPlanner {
             sqrt(search.options.maximumCandidatePairs.toDouble() / lengths.size).toInt()
                 .coerceIn(1, 128)
         val candidates = ArrayList<RankedTransition>()
-        for (bars in lengths) {
+        var pairBudgetReached = false
+        lengthScan@ for (bars in lengths) {
             search.checkCancellation()
+            /** Shortlists supported starts for this length, retaining incoming pins and stable ties. */
             fun starts(song: SupportedBars, outgoing: Boolean): List<RankedStart> =
                 (0..song.grid.barCount - bars)
                     .filter {
@@ -272,6 +280,14 @@ object AutoMixPlanner {
             val outgoing = starts(a, true)
             val incoming = starts(b, false)
             for (entry in incoming) for (exit in outgoing) {
+                // With fewer pairs than lengths, the minimum one-start shortlist can exceed
+                // the total pair budget. Preserve collected candidates for the separate fit
+                // stage rather than declining before any of their clocks have been checked.
+                if (search.pairs >= search.options.maximumCandidatePairs) {
+                    search.checkCancellation()
+                    pairBudgetReached = true
+                    break@lengthScan
+                }
                 search.inspect()
                 if (!sameBars(a.grid, b.grid, exit.bar, entry.bar, bars)) continue
                 if (a.grid.boundary(exit.bar + bars) - a.grid.boundary(exit.bar) > 512) continue
@@ -320,6 +336,11 @@ object AutoMixPlanner {
                 )
             if (result != null) return result
         }
+        if (pairBudgetReached)
+            search.fail(
+                AutoMixFailureCode.SEARCH_LIMIT_REACHED,
+                "Candidate-pair budget exhausted; no collected candidate passed all checks",
+            )
         // Independent top-N lists can omit a compatible meter sequence. Retry supported starts
         // using the remaining pair and clock-fit budgets, including automatic length selection.
         return orderedTransition(
@@ -327,6 +348,15 @@ object AutoMixPlanner {
         )
     }
 
+    /**
+     * Selects a supported overlap, preferring longer duration among the candidates examined.
+     * Both tracks must have compatible bar sequences and pass the clock quality checks. For
+     * variable meter, the pair budget may truncate enumeration; collected candidates are still
+     * fitted within the separate clock-fit budget, so the result need not be globally longest.
+     *
+     * @throws AutoMixPlanningException if no acceptable overlap is found within the search limits
+     * or either track lacks a supported bar grid. Cancellation is checked cooperatively.
+     */
     fun overlap(
         first: LocalSongAnalysis,
         second: LocalSongAnalysis,
@@ -365,10 +395,16 @@ object AutoMixPlanner {
         if (constantA && constantB) search.decline()
         val candidates = ArrayList<Candidate>()
         var next = IntArray(b.grid.barCount + 1)
+        var pairBudgetReached = false
         // Longest-common-prefix dynamic program: two rows, one bounded pair scan.
-        for (outgoing in a.grid.barCount - 1 downTo 0) {
+        pairScan@ for (outgoing in a.grid.barCount - 1 downTo 0) {
             val row = IntArray(b.grid.barCount + 1)
             for (incoming in b.grid.barCount - 1 downTo 0) {
+                if (search.pairs >= search.options.maximumCandidatePairs) {
+                    search.checkCancellation()
+                    pairBudgetReached = true
+                    break@pairScan
+                }
                 search.inspect()
                 if (a.grid.beatsInBar(outgoing) != b.grid.beatsInBar(incoming)) continue
                 val count =
@@ -413,6 +449,12 @@ object AutoMixPlanner {
                     AutoMixSelectionPolicy.LONGEST_SUPPORTED_OVERLAP,
                 )
             if (result != null) return result
+        }
+        if (pairBudgetReached) {
+            search.fail(
+                AutoMixFailureCode.SEARCH_LIMIT_REACHED,
+                "Candidate-pair budget exhausted; no collected candidate passed all checks",
+            )
         }
         search.decline()
     }

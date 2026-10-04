@@ -248,6 +248,52 @@ class AutoMixPlannerTest {
         assertEquals(null, automatic.musicalCueEvidence)
     }
 
+    /** Budgets below the length count must still fit collected pairs, with or without energy data. */
+    @Test
+    fun automaticLengthSearchFitsCollectedCandidatesBeforeExhaustingSmallPairBudgets() {
+        val plain = song(List(40) { 4 })
+        val measured = withBarEnergy(plain, List(40) { -18.0 })
+        for (track in listOf(plain, measured)) {
+            for (budget in 1..4) {
+                val plan = AutoMixPlanner.bestTransition(
+                    track, track,
+                    searchOptions = AutoMixSearchOptions(maximumCandidatePairs = budget),
+                )
+                val selected = assertNotNull(plan.automaticSelection)
+                assertEquals(budget, selected.search.inspectedPairs)
+                assertEquals(budget.toLong(), selected.search.compatibleCandidates)
+                assertEquals(0, selected.search.rejectedClocks)
+                assertEquals(AutoMixSearchStrategy.RANKED_TRANSITION_SCAN, selected.search.strategy)
+                assertEquals(selected.barCount + 1, plan.barMatches.size)
+                assertTrue(plan.barMatches.all {
+                    it.originalIncomingSeconds == it.preparedIncomingSeconds &&
+                        kotlin.math.abs(it.originalBoundaryOutputResidualSeconds) < 1e-8
+                })
+            }
+        }
+    }
+
+    /** Retaining ranked candidates must preserve speed limits and the independent one-fit cap. */
+    @Test
+    fun truncatedRankedSearchStillRejectsUnsafeClocks() {
+        for (budget in 1..4) {
+            val failure = assertFailsWith<AutoMixPlanningException> {
+                AutoMixPlanner.bestTransition(
+                    song(List(40) { 4 }), song(List(40) { 4 }, 0.6),
+                    qualityLimits = WarpQualityLimits(maximumPlaybackSpeed = 1.01),
+                    searchOptions = AutoMixSearchOptions(
+                        maximumCandidatePairs = budget, maximumClockFits = 1,
+                    ),
+                )
+            }
+            assertEquals(AutoMixFailureCode.SEARCH_LIMIT_REACHED, failure.report.failure)
+            assertEquals(AutoMixSearchStrategy.RANKED_TRANSITION_SCAN, failure.report.strategy)
+            assertEquals(budget, failure.report.inspectedPairs)
+            assertEquals(budget.toLong(), failure.report.compatibleCandidates)
+            assertEquals(1, failure.report.rejectedClocks)
+        }
+    }
+
     @Test
     fun fixedLengthSearchRecoversCompatibleBarsOutsideTheRankedShortlist() {
         val outgoing = withBarEnergy(
@@ -377,6 +423,55 @@ class AutoMixPlannerTest {
             result.barMatches.all { it.originalIncomingSeconds == it.preparedIncomingSeconds }
         )
         assertEquals(AutoMixSelectionPolicy.LONGEST_SUPPORTED_OVERLAP, selection.policy)
+    }
+
+    /** A partial prefix scan must fit its supported 3/4 candidate and preserve original boundaries. */
+    @Test
+    fun variableMeterOverlapFitsCollectedCandidatesBeforeExhaustingPairBudget() {
+        val meters = List(4) { 4 } + List(4) { 3 }
+        val track = song(meters)
+        val plan =
+            AutoMixPlanner.overlap(
+                track,
+                track,
+                searchOptions = AutoMixSearchOptions(maximumCandidatePairs = 10),
+            )
+        val selected = assertNotNull(plan.automaticSelection)
+        assertEquals(AutoMixSearchStrategy.GENERAL_PREFIX_SCAN, selected.search.strategy)
+        assertEquals(10, selected.search.inspectedPairs)
+        assertEquals(1L, selected.search.compatibleCandidates)
+        assertEquals(2, selected.barCount)
+        assertEquals(6, selected.outgoingStartBar)
+        assertEquals(6, selected.incomingStartBar)
+        assertEquals(listOf(3, 3), selected.pulsesPerBar)
+        assertEquals(3, plan.barMatches.size)
+        assertTrue(plan.barMatches.all {
+            it.originalIncomingSeconds == it.preparedIncomingSeconds &&
+                kotlin.math.abs(it.originalBoundaryOutputResidualSeconds) < 1e-8
+        })
+    }
+
+    /** A retained variable-meter candidate must still be rejected when its clock exceeds limits. */
+    @Test
+    fun truncatedVariableMeterOverlapStillRejectsUnsafeClocks() {
+        val meters = List(4) { 4 } + List(4) { 3 }
+        val failure =
+            assertFailsWith<AutoMixPlanningException> {
+                AutoMixPlanner.overlap(
+                    song(meters),
+                    song(meters, period = 0.6),
+                    qualityLimits = WarpQualityLimits(maximumPlaybackSpeed = 1.01),
+                    searchOptions = AutoMixSearchOptions(
+                        maximumCandidatePairs = 10,
+                        maximumClockFits = 1,
+                    ),
+                )
+            }
+        assertEquals(AutoMixFailureCode.SEARCH_LIMIT_REACHED, failure.report.failure)
+        assertEquals(AutoMixSearchStrategy.GENERAL_PREFIX_SCAN, failure.report.strategy)
+        assertEquals(10, failure.report.inspectedPairs)
+        assertEquals(1L, failure.report.compatibleCandidates)
+        assertEquals(1, failure.report.rejectedClocks)
     }
 
     @Test
