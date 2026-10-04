@@ -112,7 +112,6 @@ class MusicAnalyzer {
                 hop.toDouble() / sampleRate,
                 pcm.size.toDouble() / sampleRate,
             )
-        val chroma = DoubleArray(12)
         val previous = DoubleArray(n / 2)
         val previousMagnitude = DoubleArray(n / 2)
         val whitening = DoubleArray(n / 2)
@@ -156,10 +155,6 @@ class MusicAnalyzer {
                     centroidSum += hz * w
                     spectralWeight += w
                 }
-                if (hz in 80.0..1500.0) {
-                    val midi = (69.0 + 12.0 * ln(hz / 440.0) / ln(2.0)).roundToInt()
-                    chroma[((midi % 12) + 12) % 12] += mag * mag
-                }
                 previous[bin] = logMag
                 previousMagnitude[bin] = mag
             }
@@ -183,7 +178,8 @@ class MusicAnalyzer {
                     db(sqrt(power / (end - start))),
                 )
         }
-        val (key, keyConfidence) = estimateKey(chroma)
+        val (key, keyConfidence) =
+            estimateKey(highResolutionChroma(pcm, sampleRate, n, cancellationCheck))
         val audio = BeatDetector.prepareAudio(pcm, sampleRate, hop, n, peak, cancellationCheck)
         cancellationCheck()
         return PreparedMusicAnalysis(
@@ -197,6 +193,54 @@ class MusicAnalyzer {
             blocks.toList(),
             acousticAttacks.finish(),
         )
+    }
+
+    /**
+     * Key profiles need substantially finer pitch resolution than the short onset window. A
+     * 46 ms FFT at 11.025 kHz has bins more than 21 Hz apart, which can map unrelated songs and
+     * even clean triads to the same pitch class. Sample sparse, eight-times-longer windows so the
+     * added work remains bounded while semitone energy is resolved. Normalizing each window keeps
+     * a few loud sections from erasing the rest of the track's harmonic evidence.
+     */
+    private fun highResolutionChroma(
+        pcm: FloatArray,
+        sampleRate: Int,
+        onsetWindow: Int,
+        cancellationCheck: () -> Unit,
+    ): DoubleArray {
+        val windowSize = onsetWindow * 8
+        val hop = windowSize * 2
+        val hann = DoubleArray(windowSize) { 0.5 - 0.5 * cos(2.0 * PI * it / (windowSize - 1)) }
+        val real = DoubleArray(windowSize)
+        val imag = DoubleArray(windowSize)
+        val frameChroma = DoubleArray(12)
+        val chroma = DoubleArray(12)
+        for (base in -windowSize / 2 until pcm.size step hop) {
+            cancellationCheck()
+            frameChroma.fill(0.0)
+            for (i in 0 until windowSize) {
+                real[i] = if (base + i in pcm.indices) pcm[base + i] * hann[i] else 0.0
+                imag[i] = 0.0
+            }
+            fft(real, imag)
+            for (bin in 1 until windowSize / 2) {
+                val hz = bin.toDouble() * sampleRate / windowSize
+                if (hz < 55.0) continue
+                if (hz > 2000.0) break
+                val midi = 69.0 + 12.0 * ln(hz / 440.0) / ln(2.0)
+                val lower = floor(midi).toInt()
+                val fraction = midi - lower
+                val power = real[bin] * real[bin] + imag[bin] * imag[bin]
+                frameChroma[((lower % 12) + 12) % 12] += power * (1.0 - fraction)
+                frameChroma[(((lower + 1) % 12) + 12) % 12] += power * fraction
+            }
+            val norm = sqrt(frameChroma.sumOf { it * it })
+            if (norm > 1e-12) {
+                for (pitchClass in chroma.indices)
+                    chroma[pitchClass] += frameChroma[pitchClass] / norm
+            }
+        }
+        return chroma
     }
 
     private fun estimateKey(chroma: DoubleArray): Pair<String, Double> {
