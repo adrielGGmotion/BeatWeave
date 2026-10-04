@@ -157,8 +157,11 @@ planner retries the earlier earliest-incoming, latest-outgoing scan within the
 remaining candidate-pair and clock-fit budgets. Fixed-length requests retain
 their exact length; automatic requests retry 8, 4, 16, 2 and 32 bars in that
 conservative order. This can recover a compatible meter sequence omitted by the
-shortlist without relaxing any timing checks. A budget exhausted during either
-scan is reported as `SEARCH_LIMIT_REACHED`.
+shortlist without relaxing any timing checks. If the ranked scan reaches its
+candidate-pair budget, it still tries the candidates already collected within
+the separate clock-fit budget. Very small pair budgets may cover only a subset
+of fade lengths. If no candidate passes before the remaining search budget is
+exhausted, the planner reports `SEARCH_LIMIT_REACHED`.
 Caller-assembled analyses without energy features use the earlier earliest-incoming,
 latest-outgoing policy for fixed lengths. The released 0.10.0 artifacts still use
 the earlier policy and a default of 16 bars.

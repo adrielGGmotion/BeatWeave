@@ -249,6 +249,50 @@ class AutoMixPlannerTest {
     }
 
     @Test
+    fun automaticLengthSearchFitsCollectedCandidatesBeforeExhaustingSmallPairBudgets() {
+        val plain = song(List(40) { 4 })
+        val measured = withBarEnergy(plain, List(40) { -18.0 })
+        for (track in listOf(plain, measured)) {
+            for (budget in 1..4) {
+                val plan = AutoMixPlanner.bestTransition(
+                    track, track,
+                    searchOptions = AutoMixSearchOptions(maximumCandidatePairs = budget),
+                )
+                val selected = assertNotNull(plan.automaticSelection)
+                assertEquals(budget, selected.search.inspectedPairs)
+                assertEquals(budget.toLong(), selected.search.compatibleCandidates)
+                assertEquals(0, selected.search.rejectedClocks)
+                assertEquals(AutoMixSearchStrategy.RANKED_TRANSITION_SCAN, selected.search.strategy)
+                assertEquals(selected.barCount + 1, plan.barMatches.size)
+                assertTrue(plan.barMatches.all {
+                    it.originalIncomingSeconds == it.preparedIncomingSeconds &&
+                        kotlin.math.abs(it.originalBoundaryOutputResidualSeconds) < 1e-8
+                })
+            }
+        }
+    }
+
+    @Test
+    fun truncatedRankedSearchStillRejectsUnsafeClocks() {
+        for (budget in 1..4) {
+            val failure = assertFailsWith<AutoMixPlanningException> {
+                AutoMixPlanner.bestTransition(
+                    song(List(40) { 4 }), song(List(40) { 4 }, 0.6),
+                    qualityLimits = WarpQualityLimits(maximumPlaybackSpeed = 1.01),
+                    searchOptions = AutoMixSearchOptions(
+                        maximumCandidatePairs = budget, maximumClockFits = 1,
+                    ),
+                )
+            }
+            assertEquals(AutoMixFailureCode.SEARCH_LIMIT_REACHED, failure.report.failure)
+            assertEquals(AutoMixSearchStrategy.RANKED_TRANSITION_SCAN, failure.report.strategy)
+            assertEquals(budget, failure.report.inspectedPairs)
+            assertEquals(budget.toLong(), failure.report.compatibleCandidates)
+            assertEquals(1, failure.report.rejectedClocks)
+        }
+    }
+
+    @Test
     fun fixedLengthSearchRecoversCompatibleBarsOutsideTheRankedShortlist() {
         val outgoing = withBarEnergy(
             song(List(8) { 4 } + List(300) { 3 }), List(308) { -18.0 },

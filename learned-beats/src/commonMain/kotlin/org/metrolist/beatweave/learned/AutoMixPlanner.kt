@@ -249,7 +249,8 @@ object AutoMixPlanner {
             sqrt(search.options.maximumCandidatePairs.toDouble() / lengths.size).toInt()
                 .coerceIn(1, 128)
         val candidates = ArrayList<RankedTransition>()
-        for (bars in lengths) {
+        var pairBudgetReached = false
+        lengthScan@ for (bars in lengths) {
             search.checkCancellation()
             fun starts(song: SupportedBars, outgoing: Boolean): List<RankedStart> =
                 (0..song.grid.barCount - bars)
@@ -272,6 +273,14 @@ object AutoMixPlanner {
             val outgoing = starts(a, true)
             val incoming = starts(b, false)
             for (entry in incoming) for (exit in outgoing) {
+                // With fewer pairs than lengths, the minimum one-start shortlist can exceed
+                // the total pair budget. Preserve collected candidates for the separate fit
+                // stage rather than declining before any of their clocks have been checked.
+                if (search.pairs >= search.options.maximumCandidatePairs) {
+                    search.checkCancellation()
+                    pairBudgetReached = true
+                    break@lengthScan
+                }
                 search.inspect()
                 if (!sameBars(a.grid, b.grid, exit.bar, entry.bar, bars)) continue
                 if (a.grid.boundary(exit.bar + bars) - a.grid.boundary(exit.bar) > 512) continue
@@ -320,6 +329,11 @@ object AutoMixPlanner {
                 )
             if (result != null) return result
         }
+        if (pairBudgetReached)
+            search.fail(
+                AutoMixFailureCode.SEARCH_LIMIT_REACHED,
+                "Candidate-pair budget exhausted; no collected candidate passed all checks",
+            )
         // Independent top-N lists can omit a compatible meter sequence. Retry supported starts
         // using the remaining pair and clock-fit budgets, including automatic length selection.
         return orderedTransition(
