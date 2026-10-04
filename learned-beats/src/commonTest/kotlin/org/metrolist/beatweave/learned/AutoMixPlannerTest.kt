@@ -424,6 +424,53 @@ class AutoMixPlannerTest {
     }
 
     @Test
+    fun variableMeterOverlapFitsCollectedCandidatesBeforeExhaustingPairBudget() {
+        val meters = List(4) { 4 } + List(4) { 3 }
+        val track = song(meters)
+        val plan =
+            AutoMixPlanner.overlap(
+                track,
+                track,
+                searchOptions = AutoMixSearchOptions(maximumCandidatePairs = 10),
+            )
+        val selected = assertNotNull(plan.automaticSelection)
+        assertEquals(AutoMixSearchStrategy.GENERAL_PREFIX_SCAN, selected.search.strategy)
+        assertEquals(10, selected.search.inspectedPairs)
+        assertEquals(1L, selected.search.compatibleCandidates)
+        assertEquals(2, selected.barCount)
+        assertEquals(6, selected.outgoingStartBar)
+        assertEquals(6, selected.incomingStartBar)
+        assertEquals(listOf(3, 3), selected.pulsesPerBar)
+        assertEquals(3, plan.barMatches.size)
+        assertTrue(plan.barMatches.all {
+            it.originalIncomingSeconds == it.preparedIncomingSeconds &&
+                kotlin.math.abs(it.originalBoundaryOutputResidualSeconds) < 1e-8
+        })
+    }
+
+    @Test
+    fun truncatedVariableMeterOverlapStillRejectsUnsafeClocks() {
+        val meters = List(4) { 4 } + List(4) { 3 }
+        val failure =
+            assertFailsWith<AutoMixPlanningException> {
+                AutoMixPlanner.overlap(
+                    song(meters),
+                    song(meters, period = 0.6),
+                    qualityLimits = WarpQualityLimits(maximumPlaybackSpeed = 1.01),
+                    searchOptions = AutoMixSearchOptions(
+                        maximumCandidatePairs = 10,
+                        maximumClockFits = 1,
+                    ),
+                )
+            }
+        assertEquals(AutoMixFailureCode.SEARCH_LIMIT_REACHED, failure.report.failure)
+        assertEquals(AutoMixSearchStrategy.GENERAL_PREFIX_SCAN, failure.report.strategy)
+        assertEquals(10, failure.report.inspectedPairs)
+        assertEquals(1L, failure.report.compatibleCandidates)
+        assertEquals(1, failure.report.rejectedClocks)
+    }
+
+    @Test
     fun equivalentDurationTieDoesNotMoveTheAutomaticCueBecauseOfFloatingPointNoise() {
         val result = AutoMixPlanner.overlap(song(List(20) { 4 }), song(List(4) { 4 }))
         val selected = assertNotNull(result.automaticSelection)

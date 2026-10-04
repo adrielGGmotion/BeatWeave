@@ -379,10 +379,16 @@ object AutoMixPlanner {
         if (constantA && constantB) search.decline()
         val candidates = ArrayList<Candidate>()
         var next = IntArray(b.grid.barCount + 1)
+        var pairBudgetReached = false
         // Longest-common-prefix dynamic program: two rows, one bounded pair scan.
-        for (outgoing in a.grid.barCount - 1 downTo 0) {
+        pairScan@ for (outgoing in a.grid.barCount - 1 downTo 0) {
             val row = IntArray(b.grid.barCount + 1)
             for (incoming in b.grid.barCount - 1 downTo 0) {
+                if (search.pairs >= search.options.maximumCandidatePairs) {
+                    search.checkCancellation()
+                    pairBudgetReached = true
+                    break@pairScan
+                }
                 search.inspect()
                 if (a.grid.beatsInBar(outgoing) != b.grid.beatsInBar(incoming)) continue
                 val count =
@@ -427,6 +433,12 @@ object AutoMixPlanner {
                     AutoMixSelectionPolicy.LONGEST_SUPPORTED_OVERLAP,
                 )
             if (result != null) return result
+        }
+        if (pairBudgetReached) {
+            search.fail(
+                AutoMixFailureCode.SEARCH_LIMIT_REACHED,
+                "Candidate-pair budget exhausted; no collected candidate passed all checks",
+            )
         }
         search.decline()
     }
