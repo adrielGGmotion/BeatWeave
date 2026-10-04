@@ -225,6 +225,72 @@ class AutoMixPlannerTest {
     }
 
     @Test
+    fun fixedLengthSearchRecoversCompatibleBarsOutsideTheRankedShortlist() {
+        val outgoing = withBarEnergy(
+            song(List(8) { 4 } + List(300) { 3 }), List(308) { -18.0 },
+        )
+        val incoming = withBarEnergy(song(List(148) { 4 }), List(148) { -18.0 })
+        val plan = AutoMixPlanner.transition(outgoing, incoming, bars = 4)
+        val selected = assertNotNull(plan.automaticSelection)
+        assertEquals(AutoMixSelectionPolicy.EARLY_INCOMING_LATE_OUTGOING, selected.policy)
+        assertEquals(AutoMixSearchStrategy.ORDERED_TRANSITION_SCAN, selected.search.strategy)
+        assertEquals(4, selected.outgoingStartBar)
+        assertEquals(0, selected.incomingStartBar)
+        assertEquals(List(4) { 4 }, selected.pulsesPerBar)
+        assertNull(selected.musicalCueEvidence)
+        // The ranked Cartesian scan used 128 starts on each side before the ordered retry.
+        assertTrue(selected.search.inspectedPairs > 128 * 128)
+        assertTrue(selected.search.inspectedPairs <= AutoMixSearchOptions().maximumCandidatePairs)
+        assertEquals(5, plan.barMatches.size)
+        assertTrue(plan.barMatches.all {
+            it.originalIncomingSeconds == it.preparedIncomingSeconds &&
+                kotlin.math.abs(it.originalBoundaryOutputResidualSeconds) < 1e-8
+        })
+
+        val limited = assertFailsWith<AutoMixPlanningException> {
+            AutoMixPlanner.transition(
+                outgoing, incoming, bars = 4,
+                searchOptions = AutoMixSearchOptions(maximumCandidatePairs = 128 * 128),
+            )
+        }
+        assertEquals(AutoMixFailureCode.SEARCH_LIMIT_REACHED, limited.report.failure)
+        assertEquals(128 * 128, limited.report.inspectedPairs)
+        assertEquals(0, limited.report.rejectedClocks)
+    }
+
+    @Test
+    fun orderedRetryRetainsTheRankedClockFitBudgetAndQualityLimits() {
+        val outgoing = withBarEnergy(song(List(4) { 4 }), List(4) { -18.0 })
+        val incoming = withBarEnergy(song(List(4) { 4 }, 0.6), List(4) { -18.0 })
+        val quality = WarpQualityLimits(maximumPlaybackSpeed = 1.01)
+        val limited = assertFailsWith<AutoMixPlanningException> {
+            AutoMixPlanner.transition(
+                outgoing, incoming, bars = 4, qualityLimits = quality,
+                searchOptions = AutoMixSearchOptions(maximumClockFits = 1),
+            )
+        }
+        assertEquals(AutoMixSearchStrategy.ORDERED_TRANSITION_SCAN, limited.report.strategy)
+        assertEquals(AutoMixFailureCode.SEARCH_LIMIT_REACHED, limited.report.failure)
+        assertEquals(1, limited.report.rejectedClocks)
+        val rejected = assertFailsWith<AutoMixPlanningException> {
+            AutoMixPlanner.transition(outgoing, incoming, bars = 4, qualityLimits = quality)
+        }
+        assertEquals(AutoMixFailureCode.CLOCK_REJECTED, rejected.report.failure)
+        assertEquals(2, rejected.report.rejectedClocks)
+    }
+
+    @Test
+    fun musicalCueRankingRequiresPositiveFiniteDurationsForBothTracks() {
+        val audio = withBarEnergy(song(List(4) { 4 }), List(4) { -18.0 }).audio
+        assertTrue(MusicalCueRanking(audio, audio).available)
+        for (duration in listOf(0.0, -1.0, Double.NaN, Double.POSITIVE_INFINITY)) {
+            val invalid = audio.copy(durationSeconds = duration)
+            assertFalse(MusicalCueRanking(invalid, audio).available)
+            assertFalse(MusicalCueRanking(audio, invalid).available)
+        }
+    }
+
+    @Test
     fun allInteriorBarBoundariesMustMatchEvenWhenTotalPulsesMatch() {
         val a = song(List(4) { 3 } + List(4) { 5 }).copy(barTracking = null)
         val b = song(List(8) { 4 }).copy(barTracking = null)

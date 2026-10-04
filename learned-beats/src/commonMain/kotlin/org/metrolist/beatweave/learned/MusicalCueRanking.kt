@@ -146,7 +146,7 @@ internal class MusicalCueRanking(first: Analysis, second: Analysis) {
         val duration = analysis.durationSeconds
         private val sourceBlocks = analysis.energyBlocks
         val available =
-            sourceBlocks.size >= 4 &&
+            duration.isFinite() && duration > 0.0 && sourceBlocks.size >= 4 &&
                 sourceBlocks.all {
                     it.startSeconds.isFinite() && it.endSeconds.isFinite() &&
                         it.rmsDb.isFinite() && it.endSeconds > it.startSeconds

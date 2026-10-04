@@ -77,7 +77,11 @@ tempo, spectral centroid and loudness agree, it also rewards longer spans whose
 measured levels stay balanced through the candidate overlap. This can select a
 16-bar blend for compatible recordings while keeping the clock and bar checks.
 `autoTransition` ranks cues at its requested length (16 by default); it does not
-silently shorten the fade.
+silently shorten the fade. If the shortlisted cues yield no accepted plan, a
+fixed-length request retries the earlier earliest-incoming, latest-outgoing scan
+within the remaining candidate-pair and clock-fit budgets. This can recover a
+compatible meter sequence omitted by the shortlist without relaxing any timing
+checks. Automatic length selection remains bounded to its ranked shortlist.
 Caller-assembled analyses without energy features use the earlier earliest-incoming,
 latest-outgoing policy for fixed lengths. The released 0.10.0 artifacts still use
 the earlier policy and a default of 16 bars.

@@ -266,6 +266,8 @@ object AutoMixPlanner {
                 val evidence =
                     if (ranking.available) measured
                     else {
+                        // Only automatic length selection reaches this fallback; fixed lengths
+                        // without audio features go straight to orderedTransition.
                         val lengthOrder =
                             when (bars) {
                                 8 -> 5
@@ -304,6 +306,12 @@ object AutoMixPlanner {
                 )
             if (result != null) return result
         }
+        // Independent top-N lists can omit a compatible meter sequence. For a fixed length,
+        // retry the original ordering using the remaining pair and clock-fit budgets.
+        if (requestedBars != null)
+            return orderedTransition(
+                first, second, a, b, requestedBars, outputSampleRate, fitOptions, qualityLimits, search
+            )
         search.decline()
     }
 

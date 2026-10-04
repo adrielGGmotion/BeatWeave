@@ -209,7 +209,8 @@ fun main(args: Array<String>) {
         File(directory, "automatic-beat-overlap.txt")
             .writeText("DECLINE ${failure.code}\n${failure.coverage}\n${failure.clockReport}\n")
     }
-    File(directory, "automatic-choices.txt").printWriter().use { out ->
+    val choicesReport = File(directory, "automatic-choices.txt")
+    choicesReport.printWriter().use { out ->
         for (bars in TransitionPlanner.supportedBarCounts) {
             try {
                 val plan =
@@ -220,11 +221,20 @@ fun main(args: Array<String>) {
             }
         }
     }
+    val selectionReport = File(directory, "automatic-selection.txt")
     val transition =
-        AutoMixPlanner.bestTransition(songs[0], songs[1], outputSampleRate = autoRate)
+        try {
+            AutoMixPlanner.bestTransition(songs[0], songs[1], outputSampleRate = autoRate)
+        } catch (failure: AutoMixPlanningException) {
+            selectionReport.writeText("DECLINE ${failure.report}\n")
+            throw IllegalStateException(
+                "No safe automatic transition; inspect ${selectionReport.path} and ${choicesReport.path}",
+                failure,
+            )
+        }
     val selectedBars = checkNotNull(transition.automaticSelection).barCount
     val plan = transition.mixPlan
-    File(directory, "automatic-selection.txt").writeText(transition.automaticSelection.toString())
+    selectionReport.writeText(transition.automaticSelection.toString())
     writeClockAudit(directory, "transition", transition.clockFit)
     File(directory, "selected-downbeat-pairs.csv").printWriter().use { out ->
         out.println(
