@@ -10,6 +10,8 @@ playback and UI.
 Version **0.10.0 is a development release**. Automatic bar selection still accepts
 some incorrect interpretations and rejects some usable transitions. See
 [accuracy and limitations](docs/accuracy.md) before using it for unattended automix.
+The source checkout contains an unreleased cue-ranking update; the 0.10.0 Maven
+packages do not include it.
 
 ## Modules
 

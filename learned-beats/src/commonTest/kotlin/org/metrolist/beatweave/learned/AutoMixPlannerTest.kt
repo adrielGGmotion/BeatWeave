@@ -79,6 +79,20 @@ class AutoMixPlannerTest {
         )
     }
 
+    private fun withBarEnergy(song: LocalSongAnalysis, levels: List<Double>): LocalSongAnalysis {
+        val grid = song.barTracking!!.grid()
+        require(levels.size == grid.barCount)
+        val blocks =
+            levels.mapIndexed { bar, db ->
+                EnergyBlock(
+                    grid.beats.at(grid.boundary(bar)),
+                    grid.beats.at(grid.boundary(bar + 1)),
+                    db,
+                )
+            }
+        return song.copy(audio = song.audio.copy(energyBlocks = blocks))
+    }
+
     @Test
     fun automaticTransitionsChooseEarlyIncomingAndLateOutgoingForEachRequestedLength() {
         val a = song(List(40) { 4 })
@@ -103,6 +117,176 @@ class AutoMixPlannerTest {
                 result.mixPlan.first.at(0),
             )
             assertTrue(result.mixPlan.releaseAfterFade)
+        }
+    }
+
+    @Test
+    fun measuredEnergyRanksAnIncomingLiftAndOutgoingReleaseOverTheOldCueOrder() {
+        val outgoing = withBarEnergy(song(List(20) { 4 }, period = 0.6), List(16) { -12.0 } + List(4) { -24.0 })
+        val incoming = withBarEnergy(song(List(20) { 4 }, period = 0.6), List(12) { -24.0 } + List(8) { -8.0 })
+        val plan = LocalMixPlanner.autoTransition(outgoing, incoming, bars = 4)
+        val selected = assertNotNull(plan.automaticSelection)
+        assertEquals(AutoMixSelectionPolicy.AUDIO_AWARE_RANKING, selected.policy)
+        assertEquals(16, selected.outgoingStartBar)
+        assertEquals(8, selected.incomingStartBar)
+        assertTrue(assertNotNull(selected.musicalCueEvidence).incomingEndLift > 0.5)
+        assertEquals(5, plan.barMatches.size)
+        assertTrue(plan.barMatches.all { kotlin.math.abs(it.originalBoundaryOutputResidualSeconds) < 1e-8 })
+    }
+
+    @Test
+    fun fullyAutomaticModeSelectsLengthAsWellAsTimingSafeCues() {
+        val outgoing = withBarEnergy(song(List(20) { 4 }, period = 0.6), List(16) { -12.0 } + List(4) { -24.0 })
+        val incoming = withBarEnergy(song(List(20) { 4 }, period = 0.6), List(12) { -24.0 } + List(8) { -8.0 })
+        val selected = assertNotNull(LocalMixPlanner.bestTransition(outgoing, incoming).automaticSelection)
+        assertEquals(4, selected.barCount)
+        assertEquals(16, selected.outgoingStartBar)
+        assertEquals(8, selected.incomingStartBar)
+        assertEquals(null, selected.search.requestedBars)
+    }
+
+    @Test
+    fun similarSongsWithBalancedOverlapsCanSelectSixteenBarsAutomatically() {
+        fun compatibleSong(): LocalSongAnalysis {
+            val measured = withBarEnergy(song(List(40) { 4 }), List(40) { -12.0 })
+            return measured.copy(
+                audio = measured.audio.copy(keyEstimate = "F major", keyConfidence = 0.2)
+            )
+        }
+        val selected =
+            assertNotNull(LocalMixPlanner.bestTransition(compatibleSong(), compatibleSong()).automaticSelection)
+        assertEquals(16, selected.barCount)
+        val evidence = assertNotNull(selected.musicalCueEvidence)
+        assertTrue(evidence.longBlendAffinity > 0.9)
+        assertTrue(evidence.overlapLevelBalance > 0.9)
+    }
+
+    @Test
+    fun aMatchingTempoAloneDoesNotTriggerAnExtendedBlend() {
+        val first = withBarEnergy(song(List(40) { 4 }), List(40) { -12.0 })
+        val second = withBarEnergy(song(List(40) { 4 }), List(40) { -20.0 })
+        val matchingKeys =
+            first.copy(audio = first.audio.copy(keyEstimate = "F major", keyConfidence = 0.2))
+        val differentKey =
+            first.copy(audio = first.audio.copy(keyEstimate = "G major", keyConfidence = 0.2))
+        val poorBalance =
+            second.copy(audio = second.audio.copy(keyEstimate = "F major", keyConfidence = 0.2))
+
+        for (incoming in listOf(differentKey, poorBalance)) {
+            val selection =
+                assertNotNull(LocalMixPlanner.bestTransition(matchingKeys, incoming).automaticSelection)
+            assertTrue(selection.barCount < 16)
+            val evidence = assertNotNull(selection.musicalCueEvidence)
+            if (incoming === differentKey) assertEquals(0.0, evidence.longBlendAffinity)
+            else assertEquals(0.0, evidence.overlapLevelBalance)
+        }
+    }
+
+    @Test
+    fun longBlendBonusDoesNotRewardAnIncomingSectionThatWindsDown() {
+        val measured = withBarEnergy(song(List(40) { 4 }), List(40) { -12.0 })
+        val audio = measured.audio.copy(keyEstimate = "F major", keyConfidence = 0.2)
+        val ranking = MusicalCueRanking(audio, audio)
+        val grid = measured.barTracking!!.grid()
+        val outgoing = ranking.outgoing(grid, 20, 16)
+        val incoming = ranking.incoming(grid, 0, 16)
+        val steady = ranking.evidence(outgoing, incoming, 16)
+        val fading = ranking.evidence(
+            outgoing,
+            incoming.copy(endChange = -0.1, build = -0.4),
+            16,
+        )
+        assertTrue(steady.lengthPreference > 0.15)
+        assertEquals(0.15, fading.lengthPreference)
+    }
+
+    @Test
+    fun earlyBreakDoesNotDiscardMostOfTheOutgoingSong() {
+        val outgoing =
+            withBarEnergy(
+                song(List(20) { 4 }, period = 0.6),
+                List(8) { -10.0 } + List(4) { -30.0 } + List(4) { -10.0 } + List(4) { -20.0 },
+            )
+        val incoming = withBarEnergy(song(List(20) { 4 }, period = 0.6), List(12) { -24.0 } + List(8) { -8.0 })
+        val selected = assertNotNull(LocalMixPlanner.autoTransition(outgoing, incoming, bars = 4).automaticSelection)
+        assertEquals(16, selected.outgoingStartBar)
+        assertEquals(8, selected.incomingStartBar)
+    }
+
+    @Test
+    fun missingAudioFeaturesKeepExplicitLengthPolicyAndChooseAConservativeAutomaticLength() {
+        val a = song(List(20) { 4 })
+        val explicit = assertNotNull(LocalMixPlanner.autoTransition(a, a, bars = 4).automaticSelection)
+        assertEquals(AutoMixSelectionPolicy.EARLY_INCOMING_LATE_OUTGOING, explicit.policy)
+        val automatic = assertNotNull(LocalMixPlanner.bestTransition(a, a).automaticSelection)
+        assertEquals(AutoMixSelectionPolicy.AUTOMATIC_LENGTH_FALLBACK, automatic.policy)
+        assertEquals(8, automatic.barCount)
+        assertEquals(null, automatic.musicalCueEvidence)
+    }
+
+    @Test
+    fun fixedLengthSearchRecoversCompatibleBarsOutsideTheRankedShortlist() {
+        val outgoing = withBarEnergy(
+            song(List(8) { 4 } + List(300) { 3 }), List(308) { -18.0 },
+        )
+        val incoming = withBarEnergy(song(List(148) { 4 }), List(148) { -18.0 })
+        val plan = AutoMixPlanner.transition(outgoing, incoming, bars = 4)
+        val selected = assertNotNull(plan.automaticSelection)
+        assertEquals(AutoMixSelectionPolicy.EARLY_INCOMING_LATE_OUTGOING, selected.policy)
+        assertEquals(AutoMixSearchStrategy.ORDERED_TRANSITION_SCAN, selected.search.strategy)
+        assertEquals(4, selected.outgoingStartBar)
+        assertEquals(0, selected.incomingStartBar)
+        assertEquals(List(4) { 4 }, selected.pulsesPerBar)
+        assertNull(selected.musicalCueEvidence)
+        // The ranked Cartesian scan used 128 starts on each side before the ordered retry.
+        assertTrue(selected.search.inspectedPairs > 128 * 128)
+        assertTrue(selected.search.inspectedPairs <= AutoMixSearchOptions().maximumCandidatePairs)
+        assertEquals(5, plan.barMatches.size)
+        assertTrue(plan.barMatches.all {
+            it.originalIncomingSeconds == it.preparedIncomingSeconds &&
+                kotlin.math.abs(it.originalBoundaryOutputResidualSeconds) < 1e-8
+        })
+
+        val limited = assertFailsWith<AutoMixPlanningException> {
+            AutoMixPlanner.transition(
+                outgoing, incoming, bars = 4,
+                searchOptions = AutoMixSearchOptions(maximumCandidatePairs = 128 * 128),
+            )
+        }
+        assertEquals(AutoMixFailureCode.SEARCH_LIMIT_REACHED, limited.report.failure)
+        assertEquals(128 * 128, limited.report.inspectedPairs)
+        assertEquals(0, limited.report.rejectedClocks)
+    }
+
+    @Test
+    fun orderedRetryRetainsTheRankedClockFitBudgetAndQualityLimits() {
+        val outgoing = withBarEnergy(song(List(4) { 4 }), List(4) { -18.0 })
+        val incoming = withBarEnergy(song(List(4) { 4 }, 0.6), List(4) { -18.0 })
+        val quality = WarpQualityLimits(maximumPlaybackSpeed = 1.01)
+        val limited = assertFailsWith<AutoMixPlanningException> {
+            AutoMixPlanner.transition(
+                outgoing, incoming, bars = 4, qualityLimits = quality,
+                searchOptions = AutoMixSearchOptions(maximumClockFits = 1),
+            )
+        }
+        assertEquals(AutoMixSearchStrategy.ORDERED_TRANSITION_SCAN, limited.report.strategy)
+        assertEquals(AutoMixFailureCode.SEARCH_LIMIT_REACHED, limited.report.failure)
+        assertEquals(1, limited.report.rejectedClocks)
+        val rejected = assertFailsWith<AutoMixPlanningException> {
+            AutoMixPlanner.transition(outgoing, incoming, bars = 4, qualityLimits = quality)
+        }
+        assertEquals(AutoMixFailureCode.CLOCK_REJECTED, rejected.report.failure)
+        assertEquals(2, rejected.report.rejectedClocks)
+    }
+
+    @Test
+    fun musicalCueRankingRequiresPositiveFiniteDurationsForBothTracks() {
+        val audio = withBarEnergy(song(List(4) { 4 }), List(4) { -18.0 }).audio
+        assertTrue(MusicalCueRanking(audio, audio).available)
+        for (duration in listOf(0.0, -1.0, Double.NaN, Double.POSITIVE_INFINITY)) {
+            val invalid = audio.copy(durationSeconds = duration)
+            assertFalse(MusicalCueRanking(invalid, audio).available)
+            assertFalse(MusicalCueRanking(audio, invalid).available)
         }
     }
 
