@@ -6,11 +6,18 @@
 extern "C" {
 #endif
 typedef struct bw_rb_session bw_rb_session;
-/* Offline R3, stereo-linked, pitch scale 1.0. NULL / negative result means error.
+/* Offline R3, stereo-linked. NULL / negative result means error.
  * Calls on one session must be serialized. Audio buffers are interleaved.
  * Study the complete input, then process the identical input; drain after each
  * process call. Block sizes are bounded to 4096 frames by this adapter. */
 bw_rb_session *bw_rb_create(int sample_rate, int channels, int64_t source_frames, int64_t output_frames);
+/* Pitch scale is frequency(output)/frequency(input), independent of duration.
+ * Supports 0.25..4.0 (-24..24 semitones). Formant preservation keeps the original
+ * spectral envelope, useful for voices and full mixes. The shift is fixed for
+ * the complete study/render pair. Nonzero shifts require at least 100 ms of both
+ * source and output. The original create entry remains pitch 1.0. */
+bw_rb_session *bw_rb_create_pitch(int sample_rate, int channels, int64_t source_frames,
+                                int64_t output_frames, double pitch_scale, int preserve_formants);
 void bw_rb_destroy(bw_rb_session *session);
 int bw_rb_engine_version(bw_rb_session *session);
 int bw_rb_set_keyframes(bw_rb_session *session, const int64_t *source, const int64_t *output, int count);

@@ -91,6 +91,16 @@ internal constructor(
         engine: PitchStretchEngine,
         isCancelled: () -> Boolean = { false },
         progress: (Double) -> Unit = {},
+    ): PreparedMix = prepare(first, second, engine, PitchShift.None, isCancelled, progress)
+
+    /** Independent incoming transposition applied in the same pass as the accepted beat clock. */
+    fun prepare(
+        first: StereoPcm,
+        second: StereoPcm,
+        engine: PitchStretchEngine,
+        incomingPitchShift: PitchShift,
+        isCancelled: () -> Boolean = { false },
+        progress: (Double) -> Unit = {},
     ): PreparedMix {
         require(
             abs(first.durationSeconds - firstDurationSeconds) <= 0.002 &&
@@ -98,7 +108,7 @@ internal constructor(
         ) {
             "Decoded audio duration differs from its analysis; use the same source clock without trimming"
         }
-        return BeatMixer(engine).prepare(first, second, mixPlan, isCancelled, progress)
+        return BeatMixer(engine).prepare(first, second, mixPlan, incomingPitchShift, isCancelled, progress)
     }
 }
 
@@ -106,6 +116,8 @@ internal constructor(
  * The automatic integration entry point: audit pulse and selected-bar evidence, refine only when
  * necessary, and validate the complete prepared clock. A declined fit throws a typed exception; it
  * never silently changes BPM, meter, phase, pitch or acceptance limits to force a render.
+ * Bar operations take [ClockFitOptions.pinnedIncomingBeats] in the original incoming canonical
+ * clock and require the selected range to contain every pin; they remap onto the prepared grid.
  */
 object LocalMixPlanner {
     /**

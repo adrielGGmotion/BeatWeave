@@ -4,22 +4,23 @@
 
 Offline music analysis and pitch-preserving beat matching for Kotlin applications.
 BeatWeave estimates beats, bars, tempo and key, then uses the observed beat clocks
-to plan transitions or simultaneous overlaps. Applications provide audio decoding,
-playback and UI.
+to plan transitions or simultaneous overlaps. The source checkout also provides
+monophonic pitch analysis and independent pitch shifting. Applications provide
+audio decoding, playback and UI.
 
 Version **0.10.0 is a development release**. Automatic bar selection still accepts
 some incorrect interpretations and rejects some usable transitions. See
 [accuracy and limitations](docs/accuracy.md) before using it for unattended automix.
-The source checkout contains an unreleased cue-ranking update; the 0.10.0 Maven
-packages do not include it.
+The source checkout contains unreleased cue-ranking and pitch APIs; the 0.10.0
+Maven packages do not include them.
 
 ## Modules
 
 | Module | Purpose | License |
 | --- | --- | --- |
-| `analysis` | Spectral features, tempo/key estimates, beat clocks and mixing interfaces | MIT |
+| `analysis` | Spectral features, tempo/key and monophonic pitch estimates, beat clocks and mixing interfaces | MIT |
 | `learned-beats` | Local Beat This! inference, bar tracking and transition selection | MIT |
-| `rubberband` | Continuous stereo time stretching with unchanged pitch | GPL-2.0-or-later |
+| `rubberband` | Continuous stereo time stretching and independent pitch shifting | GPL-2.0-or-later |
 
 The supplied adapters support Android API 26+ and Linux x86_64/JVM. Android native
 builds cover arm64-v8a, armeabi-v7a and x86_64. Common iOS targets are optional

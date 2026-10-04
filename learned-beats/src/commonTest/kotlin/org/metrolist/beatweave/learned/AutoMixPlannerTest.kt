@@ -121,6 +121,30 @@ class AutoMixPlannerTest {
     }
 
     @Test
+    fun automaticBarSearchChoosesARangeContainingOriginalCanonicalPins() {
+        val first = song(List(8) { 4 })
+        val second = song(List(8) { 4 }, 0.41)
+        val result = AutoMixPlanner.transition(
+            first, second, bars = 4,
+            fitOptions = ClockFitOptions(pinnedIncomingBeats = setOf(25)),
+        )
+        val selected = assertNotNull(result.automaticSelection)
+        assertEquals(4, selected.outgoingStartBar)
+        assertEquals(3, selected.incomingStartBar)
+        val pin = result.clockFit.adjustments[13]
+        assertTrue(pin.pinned)
+        assertEquals(second.pulse.beats[25].seconds, pin.originalSourceSeconds)
+        assertEquals(0.0, pin.allowedDisplacementSeconds)
+
+        assertFailsWith<IllegalArgumentException> {
+            AutoMixPlanner.transition(
+                first, second, bars = 4,
+                fitOptions = ClockFitOptions(pinnedIncomingBeats = setOf(second.pulse.beats.size)),
+            )
+        }
+    }
+
+    @Test
     fun measuredEnergyRanksAnIncomingLiftAndOutgoingReleaseOverTheOldCueOrder() {
         val outgoing = withBarEnergy(song(List(20) { 4 }, period = 0.6), List(16) { -12.0 } + List(4) { -24.0 })
         val incoming = withBarEnergy(song(List(20) { 4 }, period = 0.6), List(12) { -24.0 } + List(8) { -8.0 })
@@ -255,6 +279,41 @@ class AutoMixPlannerTest {
         }
         assertEquals(AutoMixFailureCode.SEARCH_LIMIT_REACHED, limited.report.failure)
         assertEquals(128 * 128, limited.report.inspectedPairs)
+        assertEquals(0, limited.report.rejectedClocks)
+    }
+
+    @Test
+    fun automaticLengthSearchRecoversCompatibleMeterOutsideEveryRankedShortlist() {
+        val outgoing = withBarEnergy(
+            song(List(8) { 4 } + List(300) { 3 }), List(308) { -18.0 },
+        )
+        val incoming = withBarEnergy(song(List(200) { 4 }), List(200) { -18.0 })
+        val selected = assertNotNull(
+            AutoMixPlanner.bestTransition(outgoing, incoming).automaticSelection,
+        )
+        assertEquals(AutoMixSelectionPolicy.AUTOMATIC_LENGTH_FALLBACK, selected.policy)
+        assertEquals(AutoMixSearchStrategy.ORDERED_TRANSITION_SCAN, selected.search.strategy)
+        assertEquals(8, selected.barCount)
+        assertEquals(0, selected.outgoingStartBar)
+        assertEquals(0, selected.incomingStartBar)
+        assertEquals(List(8) { 4 }, selected.pulsesPerBar)
+        assertNull(selected.search.requestedBars)
+        assertNull(selected.musicalCueEvidence)
+        assertTrue(selected.search.inspectedPairs > 4 * 128 * 128)
+        assertTrue(selected.search.inspectedPairs <= AutoMixSearchOptions().maximumCandidatePairs)
+
+        // Ranked and ordered attempts share the same pair and clock-fit budgets.
+        val limited = assertFailsWith<AutoMixPlanningException> {
+            AutoMixPlanner.bestTransition(
+                outgoing, incoming,
+                searchOptions = AutoMixSearchOptions(
+                    maximumCandidatePairs = selected.search.inspectedPairs - 1,
+                ),
+            )
+        }
+        assertEquals(AutoMixFailureCode.SEARCH_LIMIT_REACHED, limited.report.failure)
+        assertEquals(AutoMixSearchStrategy.ORDERED_TRANSITION_SCAN, limited.report.strategy)
+        assertEquals(selected.search.inspectedPairs - 1, limited.report.inspectedPairs)
         assertEquals(0, limited.report.rejectedClocks)
     }
 

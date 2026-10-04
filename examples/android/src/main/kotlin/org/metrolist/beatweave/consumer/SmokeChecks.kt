@@ -92,9 +92,12 @@ object SmokeChecks {
                     ): FloatArray {
                         require(outputSampleRate == rate)
                         return FloatArray(frames * 2) { i ->
-                            (sin(2 * PI * 440 * (startFrame + i / 2) / rate) *
-                                    if (i % 2 == 0) .4 else -.2)
-                                .toFloat()
+                            val frame = startFrame + i / 2
+                            if (frame < 0 || frame >= (durationSeconds * rate).toLong()) 0f
+                            else
+                                (sin(2 * PI * 440 * frame / rate) *
+                                        if (i % 2 == 0) .4 else -.2)
+                                    .toFloat()
                         }
                     }
                 }
@@ -109,6 +112,24 @@ object SmokeChecks {
                 )
             val schedule = WarpSchedule.from(plan, source.durationSeconds)
             val engine = RubberBandEngine(cache)
+            val analyzer = PitchAnalyzer(PitchAnalysisOptions(hopSeconds = .1))
+            val originalPitch = analyzer.analyze(source, analysisSampleRate = rate)
+            check(originalPitch.frames.isNotEmpty() && originalPitch.frames.all {
+                it.frequencyHz?.let { frequency -> abs(frequency - 440.0) < 2.0 } == true
+            })
+            val shifted =
+                engine.preparePitchShift(source, rate, PitchShift(12.0, preserveFormants = false))
+            try {
+                check(shifted.durationSeconds == source.durationSeconds)
+                val stereo = shifted.readFrames(rate / 2L, rate / 2, rate)
+                val pitch = analyzer.analyze(FloatArray(stereo.size / 2) { stereo[it * 2] }, rate)
+                check(pitch.frames.isNotEmpty() && pitch.frames.all {
+                    it.frequencyHz?.let { frequency -> abs(frequency - 880.0) < 2.0 } == true
+                }) { "Minified native pitch shift did not produce A5" }
+            } finally {
+                shifted.close()
+            }
+            check(cache.listFiles()!!.isEmpty())
             val prepared = engine.prepare(source, schedule) {}
             try {
                 check(prepared.durationSeconds == schedule.outputFrames.toDouble() / rate)
@@ -226,7 +247,11 @@ object SmokeChecks {
                             else (0.2 * sin(2 * PI * 440 * time)).toFloat()
                         }
                 }
-            val transitionSession = transition.prepare(musicSource, musicSource, engine)
+            val transitionSession =
+                transition.prepare(
+                    musicSource, musicSource, engine,
+                    incomingPitchShift = PitchShift(7.0, preserveFormants = false),
+                )
             try {
                 var rendered = 0L
                 transitionSession.renderComplete(
@@ -246,7 +271,7 @@ object SmokeChecks {
                 transitionSession.close()
             }
             check(cache.listFiles()!!.isEmpty())
-            return "PASS: native pitch-preserving preparation, exact duration, stereo, seek, close, cancellation cleanup, offline learned-model inference, automatic overlap selection, automatic bar-transition render with pinned downbeats, and declared main-beat planning across unequal subdivisions."
+            return "PASS: pitch analysis, native +12-semitone shift, pitch-preserving preparation, exact duration, stereo, seek, close, cancellation cleanup, offline learned-model inference, automatic overlap selection, automatic bar-transition render with shifted incoming pitch and pinned downbeats, and declared main-beat planning across unequal subdivisions."
         } finally {
             check(cache.deleteRecursively())
         }

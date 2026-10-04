@@ -99,6 +99,32 @@ class LocalMixPlannerTest {
     }
 
     @Test
+    fun explicitBarTransitionRemapsOriginalCanonicalPinsToItsSelectedClock() {
+        val first = song(0.4)
+        val second = song(0.41)
+        val unpinned = LocalMixPlanner.transition(first, second, 8, 4, outgoingBars = 4)
+        assertFalse(unpinned.clockFit.adjustments[5].pinned)
+        val result = LocalMixPlanner.transition(
+            first, second, 8, 4, outgoingBars = 4,
+            fitOptions = ClockFitOptions(pinnedIncomingBeats = setOf(21)),
+        )
+        val pin = result.clockFit.adjustments[5]
+        assertTrue(pin.pinned)
+        assertEquals(second.pulse.beats[21].seconds, pin.originalSourceSeconds)
+        assertEquals(pin.originalSourceSeconds, pin.adjustedSourceSeconds)
+        assertEquals(0.0, pin.allowedDisplacementSeconds)
+
+        // Unselected original pins must not be reinterpreted as local cropped indices.
+        val outside = assertFailsWith<IllegalArgumentException> {
+            LocalMixPlanner.transition(
+                first, second, 8, 4, outgoingBars = 4,
+                fitOptions = ClockFitOptions(pinnedIncomingBeats = setOf(5)),
+            )
+        }
+        assertTrue(outside.message.orEmpty().contains("outside the selected bar range"))
+    }
+
+    @Test
     fun failedPulseEvidenceAndCancellationCannotStartPreparation() {
         assertFailsWith<IllegalArgumentException> {
             LocalMixPlanner.overlap(song(0.4), song(0.4, broken = true))

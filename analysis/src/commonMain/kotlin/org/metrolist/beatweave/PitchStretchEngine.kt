@@ -40,6 +40,24 @@ private constructor(
     }
 
     companion object {
+        /** Unchanged duration and timeline, for pitch-only processing at the given PCM rate. */
+        fun identity(sourceFrames: Long, sampleRate: Int): WarpSchedule {
+            require(sampleRate in 8000..192000) { "Sample rate must be in 8000..192000 Hz" }
+            require(sourceFrames in 1L..sampleRate.toLong() * 4 * 60 * 60) {
+                "Source length must be in (0, 4 hours]"
+            }
+            return WarpSchedule(
+                sampleRate, sourceFrames, 0L, sourceFrames,
+                listOf(WarpAnchor(0L, 0L), WarpAnchor(sourceFrames, sourceFrames)),
+            )
+        }
+
+        fun identity(sourceDurationSeconds: Double, sampleRate: Int): WarpSchedule {
+            require(sourceDurationSeconds.isFinite() && sourceDurationSeconds > 0.0 &&
+                sourceDurationSeconds <= 4 * 60 * 60) { "Source duration must be in (0, 4 hours]" }
+            return identity(sourceFrameCount(sourceDurationSeconds, sampleRate), sampleRate)
+        }
+
         /** Beat anchors are exact; extra knots follow continuous tempo changes between them. */
         fun from(plan: MixPlan, sourceDurationSeconds: Double): WarpSchedule {
             require(
@@ -50,7 +68,7 @@ private constructor(
                 "Source duration must be in (0, 4 hours]"
             }
             val rate = plan.outputSampleRate
-            val sourceFrames = ceil(sourceDurationSeconds * rate).toLong()
+            val sourceFrames = sourceFrameCount(sourceDurationSeconds, rate)
             val sourceEnd = sourceFrames.toDouble() / rate
             val origin = plan.secondOutputTime(0.0)
             val end = plan.secondOutputTime(sourceEnd)
@@ -124,6 +142,14 @@ private constructor(
             return WarpSchedule(rate, sourceFrames, originFrame, outputFrames, anchors)
         }
     }
+}
+
+/** A duration obtained from N/rate must not acquire a phantom frame on multiplication. */
+private fun sourceFrameCount(durationSeconds: Double, sampleRate: Int): Long {
+    val frames = durationSeconds * sampleRate
+    val nearest = frames.roundToLong()
+    // Below one millionth of a sample, within round-trip error at the supported four-hour limit.
+    return if (abs(frames - nearest) <= 1e-6) nearest else ceil(frames).toLong()
 }
 
 /** Owned random-access result. close() must be idempotent and release any cache files. */
