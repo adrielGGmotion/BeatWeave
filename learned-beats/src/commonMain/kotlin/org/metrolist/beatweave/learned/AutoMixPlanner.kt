@@ -230,6 +230,12 @@ object AutoMixPlanner {
         val evidence: MusicalCueEvidence,
     )
 
+    /**
+     * Ranks compatible cue pairs and fits collected candidates within the independent fit budget.
+     * Reaching the pair budget stops enumeration without discarding candidates. If none passes,
+     * a truncated scan reports SEARCH_LIMIT_REACHED; a completed scan can retry ordered starts
+     * using the remaining budgets.
+     */
     private fun rankedTransition(
         first: LocalSongAnalysis,
         second: LocalSongAnalysis,
@@ -252,6 +258,7 @@ object AutoMixPlanner {
         var pairBudgetReached = false
         lengthScan@ for (bars in lengths) {
             search.checkCancellation()
+            /** Shortlists supported starts for this length, retaining incoming pins and stable ties. */
             fun starts(song: SupportedBars, outgoing: Boolean): List<RankedStart> =
                 (0..song.grid.barCount - bars)
                     .filter {
@@ -341,6 +348,15 @@ object AutoMixPlanner {
         )
     }
 
+    /**
+     * Selects a supported overlap, preferring longer duration among the candidates examined.
+     * Both tracks must have compatible bar sequences and pass the clock quality checks. For
+     * variable meter, the pair budget may truncate enumeration; collected candidates are still
+     * fitted within the separate clock-fit budget, so the result need not be globally longest.
+     *
+     * @throws AutoMixPlanningException if no acceptable overlap is found within the search limits
+     * or either track lacks a supported bar grid. Cancellation is checked cooperatively.
+     */
     fun overlap(
         first: LocalSongAnalysis,
         second: LocalSongAnalysis,

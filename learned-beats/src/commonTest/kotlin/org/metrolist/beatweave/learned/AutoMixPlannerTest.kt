@@ -248,6 +248,7 @@ class AutoMixPlannerTest {
         assertEquals(null, automatic.musicalCueEvidence)
     }
 
+    /** Budgets below the length count must still fit collected pairs, with or without energy data. */
     @Test
     fun automaticLengthSearchFitsCollectedCandidatesBeforeExhaustingSmallPairBudgets() {
         val plain = song(List(40) { 4 })
@@ -272,6 +273,7 @@ class AutoMixPlannerTest {
         }
     }
 
+    /** Retaining ranked candidates must preserve speed limits and the independent one-fit cap. */
     @Test
     fun truncatedRankedSearchStillRejectsUnsafeClocks() {
         for (budget in 1..4) {
@@ -423,6 +425,7 @@ class AutoMixPlannerTest {
         assertEquals(AutoMixSelectionPolicy.LONGEST_SUPPORTED_OVERLAP, selection.policy)
     }
 
+    /** A partial prefix scan must fit its supported 3/4 candidate and preserve original boundaries. */
     @Test
     fun variableMeterOverlapFitsCollectedCandidatesBeforeExhaustingPairBudget() {
         val meters = List(4) { 4 } + List(4) { 3 }
@@ -448,6 +451,7 @@ class AutoMixPlannerTest {
         })
     }
 
+    /** A retained variable-meter candidate must still be rejected when its clock exceeds limits. */
     @Test
     fun truncatedVariableMeterOverlapStillRejectsUnsafeClocks() {
         val meters = List(4) { 4 } + List(4) { 3 }

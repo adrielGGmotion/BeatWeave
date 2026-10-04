@@ -159,8 +159,8 @@ their exact length; automatic requests retry 8, 4, 16, 2 and 32 bars in that
 conservative order. This can recover a compatible meter sequence omitted by the
 shortlist without relaxing any timing checks. If a ranked transition scan or a
 variable-meter overlap scan reaches its candidate-pair budget, it still tries
-the candidates already collected within the separate clock-fit budget. Very
-small transition budgets may cover only a subset of fade lengths. If no candidate
+the candidates already collected within the separate clock-fit budget. Small
+transition budgets may cover only a subset of fade lengths. If no candidate
 passes before the remaining search budget is exhausted, the planner reports
 `SEARCH_LIMIT_REACHED`.
 Caller-assembled analyses without energy features use the earlier earliest-incoming,
