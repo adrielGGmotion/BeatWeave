@@ -243,12 +243,12 @@ class PitchAnalyzer(private val options: PitchAnalysisOptions = PitchAnalysisOpt
             var frequency: Double? = null
             var confidence = 0.0
             if (rmsDb > options.silenceThresholdDb) {
-                pitchFft(real, imaginary, inverse = false)
+                pitchFft(real, imaginary, inverse = false, cancellationCheck)
                 for (i in real.indices) {
                     real[i] = real[i] * real[i] + imaginary[i] * imaginary[i]
                     imaginary[i] = 0.0
                 }
-                pitchFft(real, imaginary, inverse = true)
+                pitchFft(real, imaginary, inverse = true, cancellationCheck)
                 var sumDifference = 0.0
                 difference[0] = 1.0
                 for (lag in 1..layout.maximumLag + 1) {
@@ -331,12 +331,19 @@ class PitchAnalyzer(private val options: PitchAnalysisOptions = PitchAnalysisOpt
 
 private const val MAX_PITCH_DURATION_SECONDS = 4.0 * 60.0 * 60.0
 private const val MAX_PITCH_WINDOW_FRAMES = 262144
+private const val PITCH_FFT_CANCELLATION_BUTTERFLIES = 32768
 private val STEREO_CHANNEL_SWITCH_POWER_RATIO = 10.0.pow(1.0 / 10.0)
 private val PITCH_NOTE_NAMES = arrayOf("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
 
 /** In-place radix-two FFT; the inverse includes its normalization. */
-private fun pitchFft(real: DoubleArray, imaginary: DoubleArray, inverse: Boolean) {
+private fun pitchFft(
+    real: DoubleArray,
+    imaginary: DoubleArray,
+    inverse: Boolean,
+    cancellationCheck: () -> Unit,
+) {
     val size = real.size
+    cancellationCheck()
     var j = 0
     for (i in 1 until size) {
         var bit = size shr 1
@@ -356,10 +363,16 @@ private fun pitchFft(real: DoubleArray, imaginary: DoubleArray, inverse: Boolean
     }
     var length = 2
     while (length <= size) {
+        cancellationCheck()
         val angle = (if (inverse) 2.0 else -2.0) * PI / length
         val stepReal = cos(angle)
         val stepImaginary = sin(angle)
+        // Keep callback overhead bounded while ensuring a maximum-size transform cannot become
+        // one uninterruptible operation. Both values are powers of two, so the mask replaces a
+        // modulo in this hot loop.
+        val cancellationStride = max(length, PITCH_FFT_CANCELLATION_BUTTERFLIES * 2)
         for (base in 0 until size step length) {
+            if (base and (cancellationStride - 1) == 0) cancellationCheck()
             var twiddleReal = 1.0
             var twiddleImaginary = 0.0
             for (offset in 0 until length / 2) {
