@@ -12,6 +12,15 @@ interface BeatThisBackend {
     fun infer(logMel: FloatArray, frames: Int): BeatThisLogits
 }
 
+/** Optional capability for backends that can interrupt an inference already in progress. */
+interface CancellableBeatThisBackend : BeatThisBackend {
+    fun infer(
+        logMel: FloatArray,
+        frames: Int,
+        cancellationCheck: () -> Unit,
+    ): BeatThisLogits
+}
+
 data class BeatThisLogits(val beat: FloatArray, val downbeat: FloatArray) {
     init {
         require(beat.size == downbeat.size)
@@ -37,7 +46,8 @@ data class LearnedBeatAnalysis(
 /**
  * Offline beat/downbeat analysis with exactly the upstream 1500-frame, 6-frame-border, keep-first
  * overlap convention. Call on a worker thread. No model download or network occurs. Cancellation
- * may throw from cancellationCheck during preprocessing and between chunks.
+ * may throw from cancellationCheck during preprocessing and between chunks. The shipped ORT
+ * backend also polls it while a model chunk is running and terminates that run on cancellation.
  */
 class BeatThisAnalyzer(
     private val backend: BeatThisBackend,
@@ -98,7 +108,12 @@ class BeatThisAnalyzer(
                 sourceStart * BeatThisFrontend.BINS,
                 sourceEnd * BeatThisFrontend.BINS,
             )
-            val output = backend.infer(chunk, frames)
+            val output =
+                if (backend is CancellableBeatThisBackend) {
+                    backend.infer(chunk, frames, cancellationCheck)
+                } else {
+                    backend.infer(chunk, frames)
+                }
             require(output.beat.size == frames) {
                 "Model returned ${output.beat.size} frames for $frames inputs"
             }

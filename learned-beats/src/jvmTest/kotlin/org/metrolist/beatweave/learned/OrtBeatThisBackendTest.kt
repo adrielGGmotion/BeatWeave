@@ -1,6 +1,7 @@
 package org.metrolist.beatweave.learned
 
 import java.io.File
+import java.util.concurrent.CancellationException
 import kotlin.test.*
 
 class OrtBeatThisBackendTest {
@@ -52,6 +53,24 @@ class OrtBeatThisBackendTest {
     @Test fun smallModelRunsLocallyAndCloseIsIdempotent() = checkModel(BeatThisModelVariant.SMALL0)
 
     @Test fun finalModelRunsLocallyAndCloseIsIdempotent() = checkModel(BeatThisModelVariant.FINAL0)
+
+    @Test
+    fun cancellableInferenceTerminatesActiveRunAndBackendRemainsUsable() {
+        OrtBeatThisBackend(model(BeatThisModelVariant.SMALL0)).use { backend ->
+            var checks = 0
+            assertFailsWith<CancellationException> {
+                backend.infer(FloatArray(1500 * 128), 1500) {
+                    checks++
+                    if (checks >= 3) throw CancellationException("test cancellation")
+                }
+            }
+            assertTrue(checks >= 3)
+
+            val retry = backend.infer(FloatArray(51 * 128), 51)
+            assertEquals(51, retry.beat.size)
+            assertTrue(retry.beat.all { it.isFinite() })
+        }
+    }
 
     @Test
     fun modelIdentitySurvivesAnalysisAndDoesNotAliasAcrossVariants() {
