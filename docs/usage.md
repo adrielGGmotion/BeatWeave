@@ -169,12 +169,14 @@ latest-outgoing policy for fixed lengths. The released 0.10.0 artifacts still us
 the earlier policy and a default of 16 bars.
 
 These relative audio features do not identify a chorus, drop, phrase or vocal
-part. Global key estimates can also be wrong; matching labels do not prove that
-two passages are harmonically compatible. `automaticSelection.musicalCueEvidence`
-reports the measured cue score and long-blend inputs when available;
-`automaticSelection.policy` indicates the fallback. Explicit bar indices are
-zero-based. Every corresponding bar must contain the same number of canonical
-pulses, including any matched meter changes.
+part. Long-blend affinity accepts high-confidence enharmonic keys, relative
+major/minor pairs and same-mode circle-of-fifths neighbours; the independent tempo,
+timbre and loudness gates still have to pass. Global key estimates can be wrong, so
+this relationship does not prove that two passages are harmonically compatible.
+`automaticSelection.musicalCueEvidence` reports the measured cue score and
+long-blend inputs when available; `automaticSelection.policy` indicates the
+fallback. Explicit bar indices are zero-based. Every corresponding bar must contain
+the same number of canonical pulses, including any matched meter changes.
 
 For `LocalMixPlanner` and `AutoMixPlanner` bar operations,
 `ClockFitOptions.pinnedIncomingBeats` uses original incoming `pulse.beats` indices.
@@ -303,3 +305,9 @@ beat/bar/clock acceptance gates still apply. The current three-pair pilot overfi
 and is not a general-purpose automix model. Its volume, EQ and filter training is
 an offline experiment, not yet production playback automation. See
 [manual training](../tools/manual-automix/README.md) for reproduction and limits.
+
+The follow-up [corpus training experiment](../tools/corpus-automix/README.md)
+downloads its own music/annotation data, trains portable phase and timing-prior
+models, and evaluates on held-out recordings. Its acoustic cue proposals and
+listening renderer remain offline. The timing prior is weak and no new expert
+fader policy was learned; these checkpoints are not enabled by this API.

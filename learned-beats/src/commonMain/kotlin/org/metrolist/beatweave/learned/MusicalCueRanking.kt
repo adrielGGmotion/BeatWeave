@@ -112,7 +112,7 @@ internal class MusicalCueRanking(first: Analysis, second: Analysis) {
 
     private fun affinity(first: Analysis, second: Analysis): Double {
         if (!available || first.keyEstimate == "unknown" ||
-            first.keyEstimate != second.keyEstimate ||
+            !harmonicallyCompatibleKeys(first.keyEstimate, second.keyEstimate) ||
             !first.keyConfidence.isFinite() || !second.keyConfidence.isFinite() ||
             min(first.keyConfidence, second.keyConfidence) < 0.12 ||
             !first.bpm.isFinite() || !second.bpm.isFinite() ||
@@ -131,6 +131,51 @@ internal class MusicalCueRanking(first: Analysis, second: Analysis) {
         if (tempo < 0.8 || timbre < 0.5 || loudness < 0.5) return 0.0
         val key = (min(first.keyConfidence, second.keyConfidence) / 0.16).coerceIn(0.0, 1.0)
         return 0.30 * key + 0.25 * tempo + 0.25 * timbre + 0.20 * loudness
+    }
+
+    private data class TonalKey(val pitchClass: Int, val minor: Boolean)
+
+    private fun harmonicallyCompatibleKeys(first: String, second: String): Boolean {
+        val a = parseKey(first) ?: return false
+        val b = parseKey(second) ?: return false
+        val interval = (a.pitchClass - b.pitchClass + 12) % 12
+        if (a.minor == b.minor) return interval == 0 || interval == 5 || interval == 7
+        val major = if (a.minor) b else a
+        val minor = if (a.minor) a else b
+        return (minor.pitchClass - major.pitchClass + 12) % 12 == 9
+    }
+
+    private fun parseKey(value: String): TonalKey? {
+        val parts = value.trim().split(Regex("\\s+"))
+        if (parts.size != 2) return null
+        val tonic = parts[0].replace('♯', '#').replace('♭', 'b')
+        if (tonic.length !in 1..2) return null
+        var pitchClass =
+            when (tonic[0].uppercaseChar()) {
+                'C' -> 0
+                'D' -> 2
+                'E' -> 4
+                'F' -> 5
+                'G' -> 7
+                'A' -> 9
+                'B' -> 11
+                else -> return null
+            }
+        if (tonic.length == 2) {
+            pitchClass +=
+                when (tonic[1]) {
+                    '#' -> 1
+                    'b' -> -1
+                    else -> return null
+                }
+        }
+        val minor =
+            when (parts[1].lowercase()) {
+                "major" -> false
+                "minor" -> true
+                else -> return null
+            }
+        return TonalKey((pitchClass + 12) % 12, minor)
     }
 
     companion object {
