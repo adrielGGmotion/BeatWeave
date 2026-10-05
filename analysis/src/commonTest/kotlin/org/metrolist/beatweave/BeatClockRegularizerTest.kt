@@ -101,9 +101,28 @@ class BeatClockRegularizerTest {
         }
         var polls = 0
         assertFailsWith<MixCancelledException> {
-            BeatClockRegularizer.regularize(jittered(), 32.5, isCancelled = { ++polls >= 4 })
+            BeatClockRegularizer.regularize(jittered(), 32.5, isCancelled = { ++polls >= 7 })
         }
-        assertEquals(4, polls)
+        assertEquals(7, polls)
+    }
+
+    @Test
+    fun cancellationInterruptsLongClockQualityAssessment() {
+        val grid = BeatGrid(DoubleArray(50_000) { it * 0.01 })
+        val plan = MixPlan(grid, grid, 0)
+        var polls = 0
+
+        assertFailsWith<MixCancelledException> {
+            BeatClockRegularizer.regularize(
+                plan,
+                grid.at(grid.size - 1) + 0.01,
+                isCancelled = { ++polls == 5 },
+            )
+        }
+
+        // Before quality-scan polling, an already acceptable clock returned after three polls
+        // and completed the entire 50,000-beat assessment instead of observing cancellation.
+        assertEquals(5, polls)
     }
 
     @Test
