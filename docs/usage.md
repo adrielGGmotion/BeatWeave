@@ -60,6 +60,8 @@ val voiced = pitches.frames.filter { it.isVoiced }
 ```
 
 Pitch analysis uses FFT-accelerated YIN and runs independently of beat/key analysis.
+The cancellation callback is polled within large transforms as well as between windows;
+keep it fast and thread-safe.
 It estimates the fundamental frequency of isolated voices or instruments; a full
 mix can produce octave errors or ambiguous results. It does not extract a lead
 melody or transcribe chords. Confidence measures periodicity, not musical accuracy.

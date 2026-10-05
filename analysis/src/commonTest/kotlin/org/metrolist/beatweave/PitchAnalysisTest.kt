@@ -248,4 +248,27 @@ class PitchAnalysisTest {
         assertFailsWith<IllegalArgumentException> { PitchAnalyzer().analyze(invalid) }
         assertTrue(PitchAnalyzer().analyze(pcm, 11025).frames.all { it.isVoiced })
     }
+
+    @Test
+    fun maximumWindowCancellationIsCheckedInsideTheFirstFft() {
+        class Cancelled : RuntimeException()
+        val rate = 384000
+        val options =
+            PitchAnalysisOptions(
+                minimumFrequencyHz = 20.0,
+                maximumFrequencyHz = 2000.0,
+                hopSeconds = 0.5,
+                windowSeconds = 0.5,
+            )
+        val pcm = tone(220.0, rate, seconds = 0.5)
+        var checks = 0
+
+        assertFailsWith<Cancelled> {
+            PitchAnalyzer(options).analyze(pcm, rate) {
+                if (++checks == 28) throw Cancelled()
+            }
+        }
+        // Before in-transform polling, this one-window analysis made only 27 checks and returned.
+        assertTrue(checks >= 28)
+    }
 }
