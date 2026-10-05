@@ -61,7 +61,12 @@ internal class MusicalCueRanking(first: Analysis, second: Analysis) {
         val window = max(4.0, (to - from) / bars * 1.5)
         val entry = incoming.change(from, window)
         val exit = incoming.change(to, window)
-        val build = ((incoming.level(to) - incoming.level(from)) / 8.0).coerceIn(-1.0, 1.0)
+        val startLevel = incoming.measuredLevel(from)
+        val endLevel = incoming.measuredLevel(to)
+        val build =
+            if (startLevel != null && endLevel != null)
+                ((endLevel - startLevel) / 8.0).coerceIn(-1.0, 1.0)
+            else 0.0
         val position = from / incoming.duration
         val early = ((0.45 - position) / 0.4).coerceIn(-1.0, 1.0)
         val score =
@@ -71,17 +76,28 @@ internal class MusicalCueRanking(first: Analysis, second: Analysis) {
     }
 
     fun evidence(out: Part, into: Part, bars: Int): MusicalCueEvidence {
+        var completeLevelEvidence = available
+        var mismatchSum = 0.0
+        if (completeLevelEvidence) {
+            for (i in 0 until 8) {
+                val position = (i + 0.5) / 8.0
+                val outgoingLevel =
+                    outgoing.measuredLevel(out.from + (out.to - out.from) * position)
+                val incomingLevel =
+                    incoming.measuredLevel(into.from + (into.to - into.from) * position)
+                if (outgoingLevel == null || incomingLevel == null) {
+                    completeLevelEvidence = false
+                    break
+                }
+                mismatchSum += abs(outgoingLevel - incomingLevel)
+            }
+        }
         val averageMismatchDb =
-            if (available) {
-                (0 until 8).sumOf { i ->
-                    val position = (i + 0.5) / 8.0
-                    abs(
-                        outgoing.level(out.from + (out.to - out.from) * position) -
-                            incoming.level(into.from + (into.to - into.from) * position)
-                    )
-                } / 8.0
-            } else 6.0
-        val balance = (1.0 - averageMismatchDb / 6.0).coerceIn(0.0, 1.0)
+            if (completeLevelEvidence) mismatchSum / 8.0 else MISSING_LEVEL_MISMATCH_DB
+        val balance =
+            if (completeLevelEvidence)
+                (1.0 - averageMismatchDb / MISSING_LEVEL_MISMATCH_DB).coerceIn(0.0, 1.0)
+            else 0.0
         // An extended blend can carry two similar arrangements through several phrases. A short
         // fade benefits more from a decisive entry/exit lift. Avoid rewarding a long fade into a
         // section that is audibly winding down, even if the two levels happen to match.
@@ -229,9 +245,17 @@ internal class MusicalCueRanking(first: Analysis, second: Analysis) {
         }
         private val meanActivity = if (envelope.isEmpty()) 0.0 else prefix.last() / envelope.size
 
-        fun level(time: Double): Double = meanDb(time - 2.0, time + 2.0)
+        fun measuredLevel(time: Double): Double? =
+            measuredDb(time - LEVEL_HALF_WINDOW_SECONDS, time + LEVEL_HALF_WINDOW_SECONDS).let {
+                if (
+                    it.coveredSeconds >=
+                        2.0 * LEVEL_HALF_WINDOW_SECONDS * MINIMUM_CHANGE_CONTEXT_FRACTION
+                ) it.db
+                else null
+            }
 
-        fun quiet(time: Double): Double = ((median - level(time)) / 8.0).coerceIn(-1.0, 1.0)
+        fun quiet(time: Double): Double =
+            measuredLevel(time)?.let { ((median - it) / 8.0).coerceIn(-1.0, 1.0) } ?: 0.0
 
         fun change(time: Double, window: Double): Double {
             val before = measuredDb(time - window, time)
@@ -260,9 +284,6 @@ internal class MusicalCueRanking(first: Analysis, second: Analysis) {
         }
 
         private data class MeasuredLevel(val db: Double, val coveredSeconds: Double)
-
-        private fun meanDb(from: Double, to: Double): Double =
-            measuredDb(from, to).let { if (it.coveredSeconds > 0.0) it.db else median }
 
         private fun measuredDb(from: Double, to: Double): MeasuredLevel {
             val start = from.coerceIn(0.0, duration)
@@ -319,3 +340,5 @@ internal class MusicalCueRanking(first: Analysis, second: Analysis) {
 }
 
 private const val MINIMUM_CHANGE_CONTEXT_FRACTION = 0.5
+private const val LEVEL_HALF_WINDOW_SECONDS = 2.0
+private const val MISSING_LEVEL_MISMATCH_DB = 6.0

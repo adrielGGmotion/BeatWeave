@@ -11,7 +11,9 @@ are equal, enharmonic, relative major/minor or adjacent on the same-mode circle 
 fifths; tempo, spectral centroid and global loudness affinity checks must also pass,
 and longer blends are weighted by local overlap-level balance.
 For ordinary cue ranking, average overlap-level differences up to 2 dB are neutral;
-larger mismatches receive a bounded score penalty instead of being silently ignored.
+larger mismatches receive a score penalty based on the raw measured difference instead of being
+silently ignored. Missing local level coverage earns no balance or long-blend bonus and uses the
+conservative six-decibel fallback cost rather than substituting the song-wide median.
 Dynamics changes require measured energy coverage on both sides; recording boundaries
 and energy gaps are neutral rather than being compared with the song-wide median. The onset
 contribution is also neutral unless both comparison windows contain enough measured time;

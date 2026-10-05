@@ -283,6 +283,43 @@ class AutoMixPlannerTest {
         assertEquals(0.0, stronglyPenalized.overlapLevelBalance, 1e-9)
     }
 
+    @Test
+    fun cueRankingDoesNotTreatMissingOverlapLevelsAsBalanced() {
+        val measured = withBarEnergy(song(List(40) { 4 }), List(40) { -12.0 })
+        val keyed =
+            measured.copy(
+                audio = measured.audio.copy(keyEstimate = "F major", keyConfidence = 0.2)
+            )
+        val gapped =
+            keyed.copy(
+                audio =
+                    keyed.audio.copy(
+                        energyBlocks =
+                            keyed.audio.energyBlocks.filterIndexed { bar, _ ->
+                                bar < 4 || bar >= 36
+                            }
+                    )
+            )
+        val grid = keyed.barTracking!!.grid()
+        val ranking = MusicalCueRanking(keyed.audio, gapped.audio)
+        val outgoing = ranking.outgoing(grid, start = 8, bars = 16)
+        val incoming = ranking.incoming(grid, start = 8, bars = 16)
+        val evidence =
+            ranking.evidence(
+                outgoing,
+                incoming,
+                bars = 16,
+            )
+
+        assertEquals(0.0, evidence.overlapLevelBalance)
+        assertEquals(MusicalCueRanking.lengthPreference(16), evidence.lengthPreference)
+        assertEquals(
+            outgoing.score + incoming.score + MusicalCueRanking.lengthPreference(16) - 2.0,
+            evidence.score,
+            1e-9,
+        )
+    }
+
     /** Missing audio outside the recording must not be treated as a measured dynamics change. */
     @Test
     fun cueRankingDoesNotFabricateLiftsAtTrackBoundaries() {
