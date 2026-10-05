@@ -99,9 +99,15 @@ class MusicAnalyzer {
         require(sampleRate in 4000..384000 && pcm.size >= sampleRate * 3) {
             "At least 3 seconds of mono PCM required"
         }
+        var sumSq = 0.0
+        var peak = 0.0
         for (i in pcm.indices) {
             if (i % PCM_CANCELLATION_INTERVAL == 0) cancellationCheck()
-            require(pcm[i].isFinite()) { "PCM must contain only finite samples" }
+            val value = pcm[i]
+            require(value.isFinite()) { "PCM must contain only finite samples" }
+            val sample = value.toDouble()
+            sumSq += sample * sample
+            peak = max(peak, abs(sample))
         }
         // Constant temporal resolution at every sample rate. Centered windows include the
         // first attack instead of dropping the first half-window from the beat grid.
@@ -125,14 +131,6 @@ class MusicAnalyzer {
         val hann = DoubleArray(n) { 0.5 - 0.5 * cos(2.0 * PI * it / (n - 1)) }
         var centroidSum = 0.0
         var spectralWeight = 0.0
-        var sumSq = 0.0
-        var peak = 0.0
-        for (i in pcm.indices) {
-            if (i % PCM_CANCELLATION_INTERVAL == 0) cancellationCheck()
-            val d = pcm[i].toDouble()
-            sumSq += d * d
-            peak = max(peak, abs(d))
-        }
         for (frame in 0 until frames) {
             if (frame % 32 == 0) cancellationCheck()
             val base = frame * hop - n / 2

@@ -27,9 +27,9 @@ val (firstAnalysis, secondAnalysis) =
 thread. Cancellation is checked throughout analysis; the Android/JVM ORT backend
 also polls it from a short-lived watcher thread while each native inference call is
 active and terminates that run when it throws. Long decoded-PCM validation and
-statistics passes also poll the callback instead of scanning the entire recording
-atomically. The callback must therefore be fast and thread-safe. The backend owns
-its ONNX session and must be closed.
+level statistics share one pass that polls the callback instead of scanning the
+entire recording atomically. The callback must therefore be fast and thread-safe.
+The backend owns its ONNX session and must be closed.
 
 The result keeps the estimated clock and its evidence separately:
 
