@@ -64,3 +64,8 @@ beat or bar detection accuracy on arbitrary music. `LibraryDemo.kt` and
 
 JVM verification uses a Linux seccomp wrapper that denies IPv4 and IPv6 sockets.
 Android publication checks build and inspect an APK without launching it.
+
+Independent experimental automix training is documented in
+[handoff-automix](handoff-automix/README.md). It includes conditional bar-phase
+training, estimated fader supervision from real mixes, a time-only ablation and
+separated listening controls. Its checkpoints are not production-enabled.
