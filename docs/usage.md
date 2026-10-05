@@ -75,7 +75,9 @@ configured frequency; the default range therefore needs a rate of at least 10 kH
 Only complete windows are analyzed, and timestamps identify window centers on
 the original audio clock. The `StereoPcm` overload reads bounded windows, choosing
 the channel with greater energy after DC removal to avoid selecting a biased,
-silent channel or cancelling antiphase stereo. The host supplies
+silent channel or cancelling antiphase stereo. Once selected, the other channel
+must be at least one decibel stronger before the analyzer switches, so negligible
+stereo-balance changes do not flicker between panned pitches. The host supplies
 band-limited resampling when the requested analysis rate differs from the source.
 
 ## Shift pitch (unreleased source API)

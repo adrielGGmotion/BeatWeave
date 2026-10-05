@@ -102,6 +102,49 @@ class PitchAnalysisTest {
     }
 
     @Test
+    fun stereoChannelSelectionDoesNotFlickerOnSubDecibelLevelChanges() {
+        val rate = 11025
+        val durationSeconds = 1.0
+        val totalFrames = (rate * durationSeconds).roundToInt()
+        val source = object : StereoPcm {
+            override val durationSeconds = durationSeconds
+
+            override fun read(startSeconds: Double, frames: Int, outputSampleRate: Int) =
+                readFrames((startSeconds * outputSampleRate).roundToLong(), frames, outputSampleRate)
+
+            override fun readFrames(
+                startFrame: Long,
+                frames: Int,
+                outputSampleRate: Int,
+            ): FloatArray {
+                assertEquals(rate, outputSampleRate)
+                return FloatArray(frames * 2) {
+                    val frame = startFrame + it / 2
+                    val time = frame.toDouble() / rate
+                    val balance = 0.04 * sin(2.0 * PI * time / 0.16)
+                    val leftGain = if (time < 0.6) 0.4 * (1.0 + balance) else 0.04
+                    val rightGain = if (time < 0.6) 0.4 * (1.0 - balance) else 0.4
+                    val hz = if (it % 2 == 0) 220.0 else 440.0
+                    val gain = if (it % 2 == 0) leftGain else rightGain
+                    (gain * sin(2.0 * PI * hz * frame / rate)).toFloat()
+                }
+            }
+        }
+
+        val result = PitchAnalyzer().analyze(source, rate)
+        val nearlyBalanced = result.frames.filter { it.seconds < 0.5 }
+        val decisiveRight = result.frames.filter { it.seconds > 0.75 }
+
+        assertEquals(totalFrames.toDouble() / rate, result.durationSeconds, 1.0 / rate)
+        assertTrue(nearlyBalanced.isNotEmpty() && decisiveRight.isNotEmpty())
+        assertTrue(
+            nearlyBalanced.all { centsError(assertNotNull(it.frequencyHz), 220.0) < 3.0 },
+            "Sub-decibel balance changes switched the selected pitch",
+        )
+        assertTrue(decisiveRight.all { centsError(assertNotNull(it.frequencyHz), 440.0) < 3.0 })
+    }
+
+    @Test
     fun sequentialStereoWindowsReuseBoundedDecoderReads() {
         val rate = 11025
         val pcm = tone(440.0, rate, seconds = 1.2)
