@@ -80,9 +80,14 @@ class DetectorContractTest {
                 .map { beat -> reference.minOf { abs(beat.seconds - it) } }
                 .sorted()
         val p95 = errors[(errors.size * 95 / 100).coerceAtMost(errors.lastIndex)]
+        val coverage =
+            reference.count { expected ->
+                analysis.beats.any { abs(expected - it.seconds) < 0.030 }
+            }.toDouble() / reference.size
 
         assertEquals(bpm, analysis.bpm, 0.2)
         assertTrue(p95 < 0.030, "misleading intro moved the stable beat grid: p95=$p95")
+        assertTrue(coverage > 0.98, "misleading intro dropped reference beats: coverage=$coverage")
     }
 
     @Test
