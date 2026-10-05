@@ -6,6 +6,9 @@ import ai.onnxruntime.OrtSession
 import java.io.Closeable
 import java.nio.FloatBuffer
 import java.security.MessageDigest
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
+import java.util.concurrent.locks.LockSupport
 
 /**
  * Fully local CPU inference. Owns its session; use .use { ... } or close(). Inference and close are
@@ -13,7 +16,8 @@ import java.security.MessageDigest
  * exported MIT model before opening a session. Python is not needed by consumers. The application
  * supplies local model bytes.
  */
-class OrtBeatThisBackend(modelBytes: ByteArray, threads: Int = 2) : BeatThisBackend, Closeable {
+class OrtBeatThisBackend(modelBytes: ByteArray, threads: Int = 2) :
+    CancellableBeatThisBackend, Closeable {
     constructor(modelFile: java.io.File, threads: Int = 2) : this(modelFile.readBytes(), threads)
 
     companion object {
@@ -76,18 +80,89 @@ class OrtBeatThisBackend(modelBytes: ByteArray, threads: Int = 2) : BeatThisBack
     @Synchronized
     override fun infer(logMel: FloatArray, frames: Int): BeatThisLogits {
         check(!closed) { "BeatThisBackend is closed" }
+        validateInput(logMel, frames)
+        return runInference(logMel, frames, null)
+    }
+
+    @Synchronized
+    override fun infer(
+        logMel: FloatArray,
+        frames: Int,
+        cancellationCheck: () -> Unit,
+    ): BeatThisLogits {
+        check(!closed) { "BeatThisBackend is closed" }
+        validateInput(logMel, frames)
+        cancellationCheck()
+        val runOptions = OrtSession.RunOptions()
+        val completed = AtomicBoolean(false)
+        val cancellation = AtomicReference<Throwable?>(null)
+        val watcher =
+            Thread {
+                while (!completed.get()) {
+                    LockSupport.parkNanos(CANCELLATION_POLL_NANOS)
+                    if (completed.get()) break
+                    try {
+                        cancellationCheck()
+                    } catch (failure: Throwable) {
+                        if (cancellation.compareAndSet(null, failure)) {
+                            try {
+                                runOptions.setTerminate(true)
+                            } catch (terminationFailure: Throwable) {
+                                failure.addSuppressed(terminationFailure)
+                            }
+                        }
+                        break
+                    }
+                }
+            }
+        watcher.name = "BeatWeave-ORT-cancellation"
+        watcher.isDaemon = true
+        var watcherStarted = false
+        var result: BeatThisLogits? = null
+        var inferenceFailure: Throwable? = null
+        try {
+            watcher.start()
+            watcherStarted = true
+            result = runInference(logMel, frames, runOptions)
+        } catch (failure: Throwable) {
+            inferenceFailure = failure
+        } finally {
+            completed.set(true)
+            if (watcherStarted) {
+                LockSupport.unpark(watcher)
+                joinUninterruptibly(watcher)
+            }
+            runOptions.close()
+        }
+        cancellation.get()?.let { throw it }
+        inferenceFailure?.let { throw it }
+        cancellationCheck()
+        return checkNotNull(result)
+    }
+
+    private fun validateInput(logMel: FloatArray, frames: Int) {
         require(frames in 1..1500 && logMel.size == frames * 128)
         require(logMel.all { it.isFinite() })
+    }
+
+    private fun runInference(
+        logMel: FloatArray,
+        frames: Int,
+        runOptions: OrtSession.RunOptions?,
+    ): BeatThisLogits {
         OnnxTensor.createTensor(
                 environment,
                 FloatBuffer.wrap(logMel),
                 longArrayOf(1, frames.toLong(), 128),
             )
             .use { tensor ->
-                session.run(mapOf("spectrogram" to tensor)).use { output ->
+                val output =
+                    if (runOptions == null) session.run(mapOf("spectrogram" to tensor))
+                    else session.run(mapOf("spectrogram" to tensor), runOptions)
+                output.use {
                     fun read(name: String): FloatArray {
                         val value =
-                            output.get(name).orElseThrow {
+                            it.get(name).orElseThrow {
                                 IllegalStateException("Missing model output $name")
                             } as OnnxTensor
                         val buffer = value.floatBuffer
@@ -97,6 +172,18 @@ class OrtBeatThisBackend(modelBytes: ByteArray, threads: Int = 2) : BeatThisBack
                     return BeatThisLogits(read("beat_logits"), read("downbeat_logits"))
                 }
             }
+    }
+
+    private fun joinUninterruptibly(thread: Thread) {
+        var interrupted = false
+        while (thread.isAlive) {
+            try {
+                thread.join()
+            } catch (_: InterruptedException) {
+                interrupted = true
+            }
+        }
+        if (interrupted) Thread.currentThread().interrupt()
     }
 
     @Synchronized
@@ -112,3 +199,5 @@ class OrtBeatThisBackend(modelBytes: ByteArray, threads: Int = 2) : BeatThisBack
         // OrtEnvironment is a JVM-wide singleton owned by ORT. Do not close it here.
     }
 }
+
+private const val CANCELLATION_POLL_NANOS = 25_000_000L

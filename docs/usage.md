@@ -24,9 +24,10 @@ val (firstAnalysis, secondAnalysis) =
 
 `modelBytes` is the chosen local ONNX file. `checkCancelled` is a host-supplied
 `() -> Unit` that throws when cancellation is requested. Run analysis on a worker
-thread. Cancellation is checked during analysis and between inference chunks;
-it cannot interrupt an individual native ONNX call. The backend owns its ONNX
-session and must be closed.
+thread. Cancellation is checked throughout analysis; the Android/JVM ORT backend
+also polls it from a short-lived watcher thread while each native inference call is
+active and terminates that run when it throws. The callback must therefore be fast
+and thread-safe. The backend owns its ONNX session and must be closed.
 
 The result keeps the estimated clock and its evidence separately:
 
