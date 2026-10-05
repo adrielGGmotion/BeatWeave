@@ -58,4 +58,20 @@ class PreparedMusicAnalysisTest {
         assertFailsWith<IllegalArgumentException> { prepared.analyze(Double.NaN) }
         assertTrue(prepared.analyze().beats.isNotEmpty())
     }
+
+    @Test
+    fun cancellationIsPolledWhileValidatingLongPcm() {
+        class Cancelled : RuntimeException()
+        val pcm = FloatArray(65536 * 2 + 1)
+        pcm[pcm.lastIndex] = Float.NaN
+        var checks = 0
+
+        assertFailsWith<Cancelled> {
+            MusicAnalyzer().prepare(pcm, 4000) {
+                if (++checks == 3) throw Cancelled()
+            }
+        }
+        // Before validation-loop polling, the trailing NaN failed validation before check 3.
+        assertEquals(3, checks)
+    }
 }
