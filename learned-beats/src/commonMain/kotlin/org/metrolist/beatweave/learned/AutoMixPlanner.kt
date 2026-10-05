@@ -167,7 +167,7 @@ object AutoMixPlanner {
         val a = supported(first, AutoMixTrackRole.OUTGOING, search)
         val b = supported(second, AutoMixTrackRole.INCOMING, search)
         search.requireSupportedTracks()
-        val ranking = MusicalCueRanking(first.audio, second.audio)
+        val ranking = MusicalCueRanking(first.audio, second.audio, search::checkCancellation)
         // Caller-assembled analyses without audio features retain the earlier deterministic policy
         // for an explicitly requested length. The fully automatic path still selects a length.
         if (!ranking.available && bars != null)

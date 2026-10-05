@@ -569,6 +569,25 @@ class AutoMixPlannerTest {
     }
 
     @Test
+    fun musicalCueRankingCanCancelWhilePreparingLongFeatureTimelines() {
+        val base = withBarEnergy(song(List(40) { 4 }), List(40) { -18.0 }).audio
+        val longFeatures =
+            base.copy(
+                onsetEnvelope = FloatArray(1_000_000) { 1.0f },
+                onsetHopSeconds = 0.02,
+                onsetTimeOffsetSeconds = 0.0,
+            )
+        var checks = 0
+
+        assertFailsWith<MixCancelledException> {
+            MusicalCueRanking(longFeatures, longFeatures) {
+                if (++checks == 8) throw MixCancelledException()
+            }
+        }
+        assertEquals(8, checks)
+    }
+
+    @Test
     fun allInteriorBarBoundariesMustMatchEvenWhenTotalPulsesMatch() {
         val a = song(List(4) { 3 } + List(4) { 5 }).copy(barTracking = null)
         val b = song(List(8) { 4 }).copy(barTracking = null)

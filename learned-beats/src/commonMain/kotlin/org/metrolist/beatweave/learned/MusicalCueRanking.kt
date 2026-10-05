@@ -8,6 +8,7 @@ import kotlin.math.max
 import kotlin.math.min
 import org.metrolist.beatweave.Analysis
 import org.metrolist.beatweave.BarGrid
+import org.metrolist.beatweave.EnergyBlock
 
 /** Measured dynamics behind an automatic cue choice. These are relative scores, not section labels. */
 data class MusicalCueEvidence(
@@ -24,9 +25,13 @@ data class MusicalCueEvidence(
 )
 
 /** Ranks timing-safe bar ranges using changes in energy and onset activity on the source clock. */
-internal class MusicalCueRanking(first: Analysis, second: Analysis) {
-    private val outgoing = Timeline(first)
-    private val incoming = Timeline(second)
+internal class MusicalCueRanking(
+    first: Analysis,
+    second: Analysis,
+    cancellationCheck: () -> Unit = {},
+) {
+    private val outgoing = Timeline(first, cancellationCheck)
+    private val incoming = Timeline(second, cancellationCheck)
 
     val available = outgoing.available && incoming.available
     private val longBlendAffinity = affinity(first, second)
@@ -214,36 +219,76 @@ internal class MusicalCueRanking(first: Analysis, second: Analysis) {
             }
     }
 
-    private class Timeline(private val analysis: Analysis) {
+    private class Timeline(
+        private val analysis: Analysis,
+        private val cancellationCheck: () -> Unit,
+    ) {
+        init {
+            cancellationCheck()
+        }
+
         val duration = analysis.durationSeconds
         private val sourceBlocks = analysis.energyBlocks
         val available =
             duration.isFinite() && duration > 0.0 && sourceBlocks.size >= 4 &&
-                sourceBlocks.all {
-                    it.startSeconds.isFinite() && it.endSeconds.isFinite() &&
-                        it.rmsDb.isFinite() && it.endSeconds > it.startSeconds
-                } &&
-                sourceBlocks.zipWithNext().all { (a, b) -> b.startSeconds >= a.endSeconds }
+                validBlocks(sourceBlocks)
         private val blocks = if (available) sourceBlocks else emptyList()
-        private val median = blocks.map { it.rmsDb }.sorted().let { it.getOrNull(it.size / 2) ?: 0.0 }
-        private val weightedEnergy = DoubleArray(blocks.size + 1).also { sums ->
-            for (i in blocks.indices)
-                sums[i + 1] = sums[i] + blocks[i].rmsDb * (blocks[i].endSeconds - blocks[i].startSeconds)
-        }
-        private val coveredSeconds = DoubleArray(blocks.size + 1).also { sums ->
-            for (i in blocks.indices)
-                sums[i + 1] = sums[i] + blocks[i].endSeconds - blocks[i].startSeconds
-        }
-        private val envelope =
-            if (
-                analysis.onsetHopSeconds.isFinite() && analysis.onsetHopSeconds > 0.0 &&
-                    analysis.onsetTimeOffsetSeconds.isFinite() &&
-                    analysis.onsetEnvelope.all { it.isFinite() }
-            ) analysis.onsetEnvelope else FloatArray(0)
-        private val prefix = DoubleArray(envelope.size + 1).also { sums ->
-            for (i in envelope.indices) sums[i + 1] = sums[i] + max(0.0, envelope[i].toDouble())
-        }
+        private val median =
+            blocks.map { it.rmsDb }.sorted().let {
+                cancellationCheck()
+                it.getOrNull(it.size / 2) ?: 0.0
+            }
+        private val energyPrefixes = energyPrefixes(blocks)
+        private val weightedEnergy = energyPrefixes.first
+        private val coveredSeconds = energyPrefixes.second
+        private val onset = prepareOnset()
+        private val envelope = onset.first
+        private val prefix = onset.second
         private val meanActivity = if (envelope.isEmpty()) 0.0 else prefix.last() / envelope.size
+
+        private fun validBlocks(values: List<EnergyBlock>): Boolean {
+            for (i in values.indices) {
+                if (i % CANCELLATION_INTERVAL == 0) cancellationCheck()
+                val block = values[i]
+                if (
+                    !block.startSeconds.isFinite() || !block.endSeconds.isFinite() ||
+                        !block.rmsDb.isFinite() || block.endSeconds <= block.startSeconds ||
+                        i > 0 && block.startSeconds < values[i - 1].endSeconds
+                ) return false
+            }
+            cancellationCheck()
+            return true
+        }
+
+        private fun energyPrefixes(values: List<EnergyBlock>): Pair<DoubleArray, DoubleArray> {
+            val weighted = DoubleArray(values.size + 1)
+            val covered = DoubleArray(values.size + 1)
+            for (i in values.indices) {
+                if (i % CANCELLATION_INTERVAL == 0) cancellationCheck()
+                val duration = values[i].endSeconds - values[i].startSeconds
+                weighted[i + 1] = weighted[i] + values[i].rmsDb * duration
+                covered[i + 1] = covered[i] + duration
+            }
+            cancellationCheck()
+            return weighted to covered
+        }
+
+        private fun prepareOnset(): Pair<FloatArray, DoubleArray> {
+            if (
+                !analysis.onsetHopSeconds.isFinite() || analysis.onsetHopSeconds <= 0.0 ||
+                    !analysis.onsetTimeOffsetSeconds.isFinite()
+            ) return FloatArray(0) to DoubleArray(1)
+            val values = analysis.onsetEnvelope
+            val sums = DoubleArray(values.size + 1)
+            for (i in values.indices) {
+                if (i % CANCELLATION_INTERVAL == 0) cancellationCheck()
+                val value = values[i]
+                if (!value.isFinite()) return FloatArray(0) to DoubleArray(1)
+                sums[i + 1] = sums[i] + max(0.0, value.toDouble())
+            }
+            cancellationCheck()
+            return values to sums
+        }
 
         fun measuredLevel(time: Double): Double? =
             measuredDb(time - LEVEL_HALF_WINDOW_SECONDS, time + LEVEL_HALF_WINDOW_SECONDS).let {
@@ -342,3 +387,4 @@ internal class MusicalCueRanking(first: Analysis, second: Analysis) {
 private const val MINIMUM_CHANGE_CONTEXT_FRACTION = 0.5
 private const val LEVEL_HALF_WINDOW_SECONDS = 2.0
 private const val MISSING_LEVEL_MISMATCH_DB = 6.0
+private const val CANCELLATION_INTERVAL = 4096
