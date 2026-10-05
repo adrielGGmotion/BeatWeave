@@ -18,6 +18,9 @@ Dynamics changes require measured energy coverage on both sides; recording bound
 and energy gaps are neutral rather than being compared with the song-wide median. The onset
 contribution is also neutral unless both comparison windows contain enough measured time;
 boundary frames are weighted by their exact overlap with the requested window.
+Positive downbeat peaks are attached to the canonical beat clock only within the model's
+three-frame (60 ms) observation tolerance; more distant peaks remain unsupported instead of being
+moved onto unrelated beats.
 The 0.10.0 measurements below predate that change;
 they do not measure its musical quality. The new scores do not classify choruses,
 drops or vocal overlap. Compare its rendered choices by listening before treating

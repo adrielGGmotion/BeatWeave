@@ -124,7 +124,9 @@ class BeatThisAnalyzer(
         /**
          * Upstream minimal postprocessing: maxima +/-3 frames, logit >0, adjacent plateau
          * deduplication, then each detected downbeat attaches to its nearest observed beat. No BPM
-         * preference, straight-line grid, meter assumption, or fabricated beats.
+         * preference, straight-line grid, meter assumption, or fabricated beats. A downbeat is
+         * attached only when an observed beat lies within the model's +/-3-frame tolerance;
+         * distant peaks remain unsupported rather than being moved onto an unrelated pulse.
          */
         fun postprocess(logits: BeatThisLogits): Pair<List<Beat>, List<Double>> {
             require(logits.beat.all { it.isFinite() } && logits.downbeat.all { it.isFinite() })
@@ -169,10 +171,17 @@ class BeatThisAnalyzer(
             if (beats.isEmpty()) return beats to emptyList()
             val downbeats =
                 peaks(logits.downbeat)
-                    .map { frame -> beatFrames.minBy { abs(it - frame) } / 50.0 }
+                    .mapNotNull { frame ->
+                        beatFrames.minBy { abs(it - frame) }.takeIf {
+                            abs(it - frame) <= MAX_DOWNBEAT_BEAT_DISTANCE_FRAMES
+                        }
+                    }
+                    .map { it / 50.0 }
                     .distinct()
                     .sorted()
             return beats to downbeats
         }
     }
 }
+
+private const val MAX_DOWNBEAT_BEAT_DISTANCE_FRAMES = 3.0
