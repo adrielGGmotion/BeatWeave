@@ -253,6 +253,44 @@ class AutoMixPlannerTest {
         assertEquals(0.15, fading.lengthPreference)
     }
 
+    /** Missing audio outside the recording must not be treated as a measured dynamics change. */
+    @Test
+    fun cueRankingDoesNotFabricateLiftsAtTrackBoundaries() {
+        val base = song(List(8) { 4 })
+        val measured =
+            withBarEnergy(
+                base,
+                listOf(-6.0) + List(6) { -24.0 } + listOf(-6.0),
+            )
+        val ranking = MusicalCueRanking(measured.audio, measured.audio)
+        val grid = measured.barTracking!!.grid()
+
+        val incomingAtStart = ranking.incoming(grid, start = 0, bars = 2)
+        val outgoingAtEnd = ranking.outgoing(grid, start = 6, bars = 2)
+
+        assertEquals(0.0, incomingAtStart.startChange)
+        assertEquals(0.0, outgoingAtEnd.endChange)
+
+        val boundary = grid.beats.at(grid.boundary(3))
+        fun rankingWithBeforeCoverage(fraction: Double): MusicalCueRanking {
+            val window = 4.0
+            val blocks =
+                listOf(
+                    EnergyBlock(boundary - window * fraction, boundary, -24.0),
+                    EnergyBlock(boundary, boundary + 1.0, -6.0),
+                    EnergyBlock(boundary + 1.0, boundary + 2.0, -6.0),
+                    EnergyBlock(boundary + 2.0, boundary + window, -6.0),
+                )
+            val audio = base.audio.copy(energyBlocks = blocks)
+            return MusicalCueRanking(audio, audio)
+        }
+
+        val belowCutoff = rankingWithBeforeCoverage(0.49).incoming(grid, start = 3, bars = 2)
+        val atCutoff = rankingWithBeforeCoverage(0.50).incoming(grid, start = 3, bars = 2)
+        assertEquals(0.0, belowCutoff.startChange)
+        assertEquals(0.8, atCutoff.startChange, absoluteTolerance = 1e-12)
+    }
+
     @Test
     fun earlyBreakDoesNotDiscardMostOfTheOutgoingSong() {
         val outgoing =
