@@ -6,9 +6,9 @@ accepts the wrong bar level or phase, and its checks also reject usable passages
 Model confidence and agreement between detectors do not establish musical truth.
 
 The current source checkout adds an unreleased energy/onset cue ranking pass and
-automatic fade-length selection, including longer blends when estimated key,
-tempo, spectral centroid and loudness agree and the selected overlap has balanced
-levels.
+automatic fade-length selection, including longer blends when high-confidence keys
+are equal, enharmonic, relative major/minor or adjacent on the same-mode circle of
+fifths; tempo, spectral centroid, loudness and overlap-level gates must also pass.
 The 0.10.0 measurements below predate that change;
 they do not measure its musical quality. The new scores do not classify choruses,
 drops or vocal overlap. Compare its rendered choices by listening before treating
