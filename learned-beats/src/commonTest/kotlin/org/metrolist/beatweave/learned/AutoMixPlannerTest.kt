@@ -171,6 +171,36 @@ class AutoMixPlannerTest {
     }
 
     @Test
+    fun automaticLengthDoesNotDoubleCountOverlappingBoundaryWindows() {
+        // With unweighted four-second endpoint windows, the same changes at both ends made this
+        // 150 BPM fixture select two bars (3.2 s) instead of the supported eight-bar phrase.
+        val outgoing =
+            withBarEnergy(
+                song(List(20) { 4 }),
+                listOf(
+                    -18.0, -12.0, -18.0, -18.0, -24.0, -24.0, -18.0, -12.0,
+                    -12.0, -24.0, -18.0, -12.0, -24.0, -12.0, -24.0, -12.0,
+                    -12.0, -24.0, -18.0, -6.0,
+                ),
+            )
+        val incoming =
+            withBarEnergy(
+                song(List(20) { 4 }),
+                listOf(
+                    -18.0, -12.0, -18.0, -12.0, -12.0, -18.0, -24.0, -18.0,
+                    -6.0, -18.0, -18.0, -18.0, -24.0, -12.0, -18.0, -24.0,
+                    -24.0, -18.0, -18.0, -18.0,
+                ),
+            )
+
+        val selected =
+            assertNotNull(LocalMixPlanner.bestTransition(outgoing, incoming).automaticSelection)
+
+        assertEquals(8, selected.barCount)
+        assertTrue(selected.outgoingEndSeconds - selected.outgoingStartSeconds >= 8.0)
+    }
+
+    @Test
     fun similarSongsWithBalancedOverlapsCanSelectSixteenBarsAutomatically() {
         fun compatibleSong(): LocalSongAnalysis {
             val measured = withBarEnergy(song(List(40) { 4 }), List(40) { -12.0 })
