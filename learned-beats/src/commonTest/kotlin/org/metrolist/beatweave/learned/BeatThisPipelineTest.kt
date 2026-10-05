@@ -43,6 +43,23 @@ class BeatThisPipelineTest {
     }
 
     @Test
+    fun distantDownbeatPeaksAreNotMovedOntoUnrelatedBeats() {
+        val beats = FloatArray(100) { -5f }.also {
+            it[20] = 4f
+            it[50] = 4f
+        }
+        val downbeats = FloatArray(100) { -5f }.also {
+            it[23] = 4f // Accepted at the documented +/-3-frame tolerance.
+            it[54] = 4f // No supporting beat within that tolerance.
+        }
+
+        val result = BeatThisAnalyzer.postprocess(BeatThisLogits(beats, downbeats))
+
+        assertEquals(listOf(.4, 1.0), result.first.map { it.seconds })
+        assertEquals(listOf(.4), result.second)
+    }
+
+    @Test
     fun flatZeroActivationsDoNotInventBeats() {
         val result = BeatThisAnalyzer.postprocess(BeatThisLogits(FloatArray(100), FloatArray(100)))
         assertTrue(result.first.isEmpty())
