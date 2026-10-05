@@ -61,6 +61,48 @@ The experimental R3 renderer samples the accepted continuous source clock at
 quality or exact prepared-renderer parity of this separate native audition path.
 These artifacts are not enabled in the library's default production API.
 
+### Renderer repair after the second listening test
+
+The archived R3 runner failed while rendering Yeah, No → Somebody Told Me:
+1,193,427 frames arrived instead of 1,202,880. Replaying the identical native
+input/map reproduced the output byte for byte. A separate synthetic decreasing
+speed map also exposed missing frames and attack drift over 200 ms. R3's local
+ratio updates do not provide the required timing on these dense changing maps.
+
+`build_renderer.py` builds a separate R2 offline mapped renderer. The synthetic
+decreasing and oscillating speed tests check full duration, independently placed
+attacks within 30 ms, unchanged 440 Hz pitch within 2 Hz, linked stereo, and
+invalid-map rejection. Measured maximum attack errors were 8.4 ms and 7.5 ms.
+These synthetic checks do not establish musical beat annotations or listening
+quality. The exact failed music input now returns all 1,202,880 frames.
+
+`retry_render.py` reuses the first accepted plan and clock map, verifies the
+original source and release hashes, and applies the original trained faders.
+There is no cue, duration, bar-count, EQ, gain, or timing override. It records the
+replacement renderer hash and preserves the original failed attempt and release.
+This is explicitly a renderer-repair retry, not an unchanged frozen-runner result
+or a new training round. The historic `run_auto.py` and frozen binary remain
+unchanged; this repair is not enabled in the default production library.
+
+```sh
+python3 tools/preference-automix/build_renderer.py
+OPENBLAS_NUM_THREADS=2 python3 -m unittest discover \
+  -s tools/preference-automix -p test_renderer.py -v
+python3 tools/preference-automix/retry_render.py outgoing.opus incoming.m4a \
+  --attempt ORIGINAL_FAILED_ATTEMPT --release OUTPUT/frozen --out NEW_EMPTY_DIRECTORY
+python3 tools/preference-automix/audit_bars.py \
+  --attempt ORIGINAL_FAILED_ATTEMPT --release OUTPUT/frozen --out NEW_AUDIT_DIRECTORY
+```
+
+The read-only bar-count audit compares automatic selection with separately
+requested 8 and 16 bars using the same frozen compiled library and cue model.
+Both lengths pass timing checks on this pair, but the older cue scorer assigns
+11.7175 to its accepted 8-bar choice and 1.0662 to its accepted 16-bar choice.
+The scored candidates have different cues as well as different lengths. These
+are relative model scores, not calibrated musical-quality ratings. The recent
+volume training did not train a new duration preference, and no ranking change
+is made by this renderer repair.
+
 ```sh
 python3 tools/preference-automix/bootstrap.py
 python3 tools/preference-automix/prepare_feedback.py INPUTS WORK OUTPUT

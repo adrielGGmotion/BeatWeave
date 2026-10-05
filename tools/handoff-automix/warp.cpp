@@ -41,7 +41,14 @@ int main(int argc, char **argv) {
         std::vector<float> a(count),b(count);
         for(size_t i=0;i<count;++i){a[i]=interleaved[2*i];b[i]=interleaved[2*i+1];}
         using R=RubberBand::RubberBandStretcher;
-        R stretch(48000,2,R::OptionProcessOffline|R::OptionEngineFiner|
+#ifdef BEATWEAVE_MAP_ENGINE_R2
+        // R3's local-ratio map updates can accumulate drift on dense changing
+        // maps. R2 calculates a complete offline stretch profile from anchors.
+        constexpr auto engine=R::OptionEngineFaster;
+#else
+        constexpr auto engine=R::OptionEngineFiner;
+#endif
+        R stretch(48000,2,R::OptionProcessOffline|engine|
             R::OptionThreadingNever|R::OptionChannelsTogether|R::OptionPitchHighQuality,ratio,1.);
         stretch.setExpectedInputDuration(count);stretch.setMaxProcessSize(4096);
         stretch.setKeyFrameMap(mapping);
