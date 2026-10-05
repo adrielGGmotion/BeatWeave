@@ -254,6 +254,35 @@ class AutoMixPlannerTest {
         assertEquals(0.15, fading.lengthPreference)
     }
 
+    @Test
+    fun cueRankingPenalizesOnlyLevelMismatchBeyondTwoDecibels() {
+        val first = withBarEnergy(song(List(20) { 4 }), List(20) { -12.0 })
+        val near = withBarEnergy(song(List(20) { 4 }), List(20) { -14.0 })
+        val far = withBarEnergy(song(List(20) { 4 }), List(20) { -17.0 })
+        val veryFar = withBarEnergy(song(List(20) { 4 }), List(20) { -20.0 })
+        val firstGrid = first.barTracking!!.grid()
+
+        fun evidence(second: LocalSongAnalysis): Pair<MusicalCueEvidence, Double> {
+            val ranking = MusicalCueRanking(first.audio, second.audio)
+            val outgoing = ranking.outgoing(firstGrid, start = 4, bars = 4)
+            val incoming = ranking.incoming(second.barTracking!!.grid(), start = 4, bars = 4)
+            return Pair(
+                ranking.evidence(outgoing, incoming, bars = 4),
+                outgoing.score + incoming.score + MusicalCueRanking.lengthPreference(4),
+            )
+        }
+
+        val (tolerated, toleratedUnpenalizedScore) = evidence(near)
+        val (penalized, penalizedUnpenalizedScore) = evidence(far)
+        val (stronglyPenalized, stronglyPenalizedUnpenalizedScore) = evidence(veryFar)
+        assertEquals(toleratedUnpenalizedScore, tolerated.score, 1e-9)
+        assertEquals(penalizedUnpenalizedScore - 1.5, penalized.score, 1e-9)
+        assertEquals(stronglyPenalizedUnpenalizedScore - 3.0, stronglyPenalized.score, 1e-9)
+        assertEquals(2.0 / 3.0, tolerated.overlapLevelBalance, 1e-9)
+        assertEquals(1.0 / 6.0, penalized.overlapLevelBalance, 1e-9)
+        assertEquals(0.0, stronglyPenalized.overlapLevelBalance, 1e-9)
+    }
+
     /** Missing audio outside the recording must not be treated as a measured dynamics change. */
     @Test
     fun cueRankingDoesNotFabricateLiftsAtTrackBoundaries() {

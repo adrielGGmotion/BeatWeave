@@ -71,18 +71,17 @@ internal class MusicalCueRanking(first: Analysis, second: Analysis) {
     }
 
     fun evidence(out: Part, into: Part, bars: Int): MusicalCueEvidence {
-        val balance =
+        val averageMismatchDb =
             if (available) {
-                val difference =
-                    (0 until 8).sumOf { i ->
-                        val position = (i + 0.5) / 8.0
-                        abs(
-                            outgoing.level(out.from + (out.to - out.from) * position) -
-                                incoming.level(into.from + (into.to - into.from) * position)
-                        )
-                    } / 8.0
-                (1.0 - difference / 6.0).coerceIn(0.0, 1.0)
-            } else 0.0
+                (0 until 8).sumOf { i ->
+                    val position = (i + 0.5) / 8.0
+                    abs(
+                        outgoing.level(out.from + (out.to - out.from) * position) -
+                            incoming.level(into.from + (into.to - into.from) * position)
+                    )
+                } / 8.0
+            } else 6.0
+        val balance = (1.0 - averageMismatchDb / 6.0).coerceIn(0.0, 1.0)
         // An extended blend can carry two similar arrangements through several phrases. A short
         // fade benefits more from a decisive entry/exit lift. Avoid rewarding a long fade into a
         // section that is audibly winding down, even if the two levels happen to match.
@@ -97,13 +96,21 @@ internal class MusicalCueRanking(first: Analysis, second: Analysis) {
                 } * longBlendAffinity * balance
             else 0.0
         val length = lengthPreference(bars) + longBonus
+        // Balance is one at equal levels and reaches zero at a six-decibel average mismatch.
+        // Small arrangement differences are useful cue evidence, not a reason to reject a lift.
+        // Beyond two decibels, however, a large lift previously won even when the selected songs
+        // would hand over at conspicuously different levels. Keep this a ranking cost rather than
+        // an acceptance gate: callers still receive the best timing-safe choice available.
+        val levelPenalty =
+            max(0.0, averageMismatchDb - UNPENALIZED_LEVEL_MISMATCH_DB) *
+                LEVEL_MISMATCH_SCORE_PER_DB
         return MusicalCueEvidence(
             incomingEndLift = into.endChange,
             incomingStartLift = into.startChange,
             outgoingStartRelease = -out.startChange,
             incomingBuild = into.build,
             lengthPreference = length,
-            score = out.score + into.score + length,
+            score = out.score + into.score + length - levelPenalty,
             longBlendAffinity = longBlendAffinity,
             overlapLevelBalance = balance,
         )
@@ -178,6 +185,9 @@ internal class MusicalCueRanking(first: Analysis, second: Analysis) {
     }
 
     companion object {
+        private const val UNPENALIZED_LEVEL_MISMATCH_DB = 2.0
+        private const val LEVEL_MISMATCH_SCORE_PER_DB = 0.5
+
         fun lengthPreference(bars: Int): Double =
             when (bars) {
                 8 -> 0.65
