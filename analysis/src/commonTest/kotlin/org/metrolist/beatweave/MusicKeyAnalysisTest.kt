@@ -7,6 +7,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 
 class MusicKeyAnalysisTest {
+    /** Concert-pitch triads retain their expected labels with the longer chroma window. */
     @Test
     fun highResolutionChromaAvoidsShortFftBinKeyBias() {
         val cases =
@@ -21,6 +22,7 @@ class MusicKeyAnalysisTest {
         }
     }
 
+    /** A consistent tuning offset must not change the chord's root or major/minor mode. */
     @Test
     fun keyEstimateCompensatesForGlobalTuningOffset() {
         val cases =
@@ -36,6 +38,7 @@ class MusicKeyAnalysisTest {
         }
     }
 
+    /** Synthesizes a modulated triad with all partials shifted by the same number of cents. */
     private fun chord(notes: IntArray, cents: Double = 0.0): FloatArray =
         FloatArray(SAMPLE_RATE * 12) { sample ->
             val time = sample.toDouble() / SAMPLE_RATE
