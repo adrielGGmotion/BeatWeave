@@ -70,9 +70,10 @@ data class PitchAnalysis(
  * Chords, percussion, strong harmonics and full mixes can produce ambiguous or octave-shifted
  * estimates; use [PitchFrame.confidence] as evidence rather than musical correctness.
  *
- * Scratch memory depends on sample rate and window length, not track length. Results use one
- * frame per hop. Inputs are limited to four hours and one million result frames. The analyzer
- * retains no caller PCM, source, callback or native resource. Each invocation has its own buffers.
+ * Scratch memory depends on sample rate and window length, not track length. Stereo decoding adds
+ * a bounded sequential cache of at most 2 MiB. Results use one frame per hop. Inputs are limited to
+ * four hours and one million result frames. The analyzer retains no caller PCM, source, callback or
+ * native resource after a call. Each invocation has its own buffers.
  */
 class PitchAnalyzer(private val options: PitchAnalysisOptions = PitchAnalysisOptions()) {
     /**
@@ -124,15 +125,36 @@ class PitchAnalyzer(private val options: PitchAnalysisOptions = PitchAnalysisOpt
                 nearestFrame.toLong()
             else floor(durationFrames).toLong()
         val layout = layout(analysisSampleRate, sampleCount)
+        // Default windows overlap by roughly 75%. Decode bounded sequential chunks so a long
+        // source is not reread and reallocated once per hop while retaining per-window channels.
+        val cacheCapacity =
+            max(
+                layout.window,
+                min(analysisSampleRate.toLong() * 2L, MAX_PITCH_WINDOW_FRAMES.toLong()).toInt(),
+            )
+        var cacheStart = -1L
+        var cacheFrames = 0
+        var stereoCache = FloatArray(0)
         return analyzeWindows(layout, analysisSampleRate, duration, cancellationCheck) { start, window ->
-            val stereo = source.readFrames(start, window.size, analysisSampleRate)
-            require(stereo.size == window.size * 2) { "Stereo source returned an incorrect frame count" }
+            if (
+                cacheStart < 0L ||
+                    start < cacheStart ||
+                    start + window.size > cacheStart + cacheFrames
+            ) {
+                cacheStart = start
+                cacheFrames = min(sampleCount - start, cacheCapacity.toLong()).toInt()
+                stereoCache = source.readFrames(cacheStart, cacheFrames, analysisSampleRate)
+                require(stereoCache.size == cacheFrames * 2) {
+                    "Stereo source returned an incorrect frame count"
+                }
+            }
+            val offset = (start - cacheStart).toInt()
             var leftMean = 0.0
             var rightMean = 0.0
             for (i in window.indices) {
                 if (i % 8192 == 0) cancellationCheck()
-                val left = stereo[i * 2].toDouble()
-                val right = stereo[i * 2 + 1].toDouble()
+                val left = stereoCache[(offset + i) * 2].toDouble()
+                val right = stereoCache[(offset + i) * 2 + 1].toDouble()
                 require(left.isFinite() && right.isFinite()) { "PCM must contain only finite samples" }
                 leftMean += left
                 rightMean += right
@@ -145,13 +167,14 @@ class PitchAnalyzer(private val options: PitchAnalysisOptions = PitchAnalysisOpt
             // Sum centered squares directly to avoid cancellation in E[x²] - E[x]².
             for (i in window.indices) {
                 if (i % 8192 == 0) cancellationCheck()
-                val left = stereo[i * 2].toDouble() - leftMean
-                val right = stereo[i * 2 + 1].toDouble() - rightMean
+                val left = stereoCache[(offset + i) * 2].toDouble() - leftMean
+                val right = stereoCache[(offset + i) * 2 + 1].toDouble() - rightMean
                 leftPower += left * left
                 rightPower += right * right
             }
             val channel = if (rightPower > leftPower) 1 else 0
-            for (i in window.indices) window[i] = stereo[i * 2 + channel].toDouble()
+            for (i in window.indices)
+                window[i] = stereoCache[(offset + i) * 2 + channel].toDouble()
         }
     }
 
@@ -165,7 +188,7 @@ class PitchAnalyzer(private val options: PitchAnalysisOptions = PitchAnalysisOpt
         }
         val maximumLag = ceil(sampleRate / options.minimumFrequencyHz).toInt()
         val window = max(ceil(options.windowSeconds * sampleRate).toInt(), maximumLag * 4 + 1)
-        require(window <= 262144) { "Pitch analysis window exceeds the sample limit" }
+        require(window <= MAX_PITCH_WINDOW_FRAMES) { "Pitch analysis window exceeds the sample limit" }
         require(sampleCount >= window) { "At least one complete pitch analysis window is required" }
         val hop = max(1, (options.hopSeconds * sampleRate).roundToInt())
         val frames = 1L + (sampleCount - window) / hop
@@ -295,6 +318,7 @@ class PitchAnalyzer(private val options: PitchAnalysisOptions = PitchAnalysisOpt
 }
 
 private const val MAX_PITCH_DURATION_SECONDS = 4.0 * 60.0 * 60.0
+private const val MAX_PITCH_WINDOW_FRAMES = 262144
 private val PITCH_NOTE_NAMES = arrayOf("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
 
 /** In-place radix-two FFT; the inverse includes its normalization. */
