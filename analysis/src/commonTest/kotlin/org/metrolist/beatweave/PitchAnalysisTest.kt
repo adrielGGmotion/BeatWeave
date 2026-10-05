@@ -102,6 +102,37 @@ class PitchAnalysisTest {
     }
 
     @Test
+    fun sequentialStereoWindowsReuseBoundedDecoderReads() {
+        val rate = 11025
+        val pcm = tone(440.0, rate, seconds = 1.2)
+        var reads = 0
+        var framesRead = 0L
+        val source = object : StereoPcm {
+            override val durationSeconds = pcm.size.toDouble() / rate
+
+            override fun read(startSeconds: Double, frames: Int, outputSampleRate: Int) =
+                readFrames((startSeconds * outputSampleRate).roundToLong(), frames, outputSampleRate)
+
+            override fun readFrames(
+                startFrame: Long,
+                frames: Int,
+                outputSampleRate: Int,
+            ): FloatArray {
+                assertEquals(rate, outputSampleRate)
+                assertTrue(startFrame >= 0L && startFrame + frames <= pcm.size)
+                reads++
+                framesRead += frames
+                return FloatArray(frames * 2) { pcm[(startFrame + it / 2).toInt()] }
+            }
+        }
+        val analyzer = PitchAnalyzer()
+
+        assertEquals(analyzer.analyze(pcm, rate), analyzer.analyze(source, rate))
+        assertEquals(1, reads)
+        assertEquals(pcm.size.toLong(), framesRead)
+    }
+
+    @Test
     fun frameCountDerivedStereoDurationsMatchMonoWithoutLosingCompleteWindows() {
         val rate = 11025
         val options = PitchAnalysisOptions(windowSeconds = 889.0 / rate)
