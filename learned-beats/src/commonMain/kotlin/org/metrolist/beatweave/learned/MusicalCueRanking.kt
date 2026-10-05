@@ -2,6 +2,7 @@ package org.metrolist.beatweave.learned
 
 import kotlin.math.abs
 import kotlin.math.ceil
+import kotlin.math.floor
 import kotlin.math.ln
 import kotlin.math.max
 import kotlin.math.min
@@ -233,10 +234,16 @@ internal class MusicalCueRanking(first: Analysis, second: Analysis) {
                     after.coveredSeconds < window * MINIMUM_CHANGE_CONTEXT_FRACTION
             ) return 0.0
             val energy = ((after.db - before.db) / 6.0).coerceIn(-1.0, 1.0)
+            val activityBefore = measuredOnset(time - window, time)
+            val activityAfter = measuredOnset(time, time + window)
             val activity =
-                if (meanActivity <= 1e-9) 0.0
+                if (
+                    meanActivity <= 1e-9 ||
+                        activityBefore.coveredSeconds < window * MINIMUM_CHANGE_CONTEXT_FRACTION ||
+                        activityAfter.coveredSeconds < window * MINIMUM_CHANGE_CONTEXT_FRACTION
+                ) 0.0
                 else
-                    ((meanOnset(time, time + window) - meanOnset(time - window, time)) /
+                    ((activityAfter.mean - activityBefore.mean) /
                             (2.0 * meanActivity))
                         .coerceIn(-1.0, 1.0)
             return (0.8 * energy + 0.2 * activity).coerceIn(-1.0, 1.0)
@@ -269,15 +276,34 @@ internal class MusicalCueRanking(first: Analysis, second: Analysis) {
             return MeasuredLevel(if (covered > 0) weighted / covered else median, covered)
         }
 
-        private fun meanOnset(from: Double, to: Double): Double {
-            if (envelope.isEmpty() || analysis.onsetHopSeconds <= 0) return 0.0
-            fun frame(time: Double) =
-                ceil((time - analysis.onsetTimeOffsetSeconds) / analysis.onsetHopSeconds)
-                    .toInt()
-                    .coerceIn(0, envelope.size)
-            val start = frame(max(0.0, from))
-            val end = frame(min(duration, to))
-            return if (end > start) (prefix[end] - prefix[start]) / (end - start) else 0.0
+        private data class MeasuredActivity(val mean: Double, val coveredSeconds: Double)
+
+        private fun measuredOnset(from: Double, to: Double): MeasuredActivity {
+            if (envelope.isEmpty() || analysis.onsetHopSeconds <= 0)
+                return MeasuredActivity(0.0, 0.0)
+            val hop = analysis.onsetHopSeconds
+            val offset = analysis.onsetTimeOffsetSeconds
+            val start = max(max(0.0, from), offset)
+            val end = min(min(duration, to), offset + envelope.size * hop)
+            if (end <= start) return MeasuredActivity(0.0, 0.0)
+
+            val first =
+                floor((start - offset) / hop).toInt().coerceIn(0, envelope.lastIndex)
+            val last =
+                (ceil((end - offset) / hop).toInt() - 1).coerceIn(first, envelope.lastIndex)
+            val weighted =
+                if (first == last) {
+                    max(0.0, envelope[first].toDouble()) * (end - start)
+                } else {
+                    val firstEnd = offset + (first + 1) * hop
+                    val lastStart = offset + last * hop
+                    val middle = (prefix[last] - prefix[first + 1]) * hop
+                    max(0.0, envelope[first].toDouble()) * (firstEnd - start) +
+                        middle +
+                        max(0.0, envelope[last].toDouble()) * (end - lastStart)
+                }
+            val covered = end - start
+            return MeasuredActivity(weighted / covered, covered)
         }
     }
 }

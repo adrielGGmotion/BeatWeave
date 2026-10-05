@@ -1,5 +1,6 @@
 package org.metrolist.beatweave.learned
 
+import kotlin.math.ceil
 import kotlin.math.roundToInt
 import kotlin.test.*
 import org.metrolist.beatweave.*
@@ -289,6 +290,45 @@ class AutoMixPlannerTest {
         val atCutoff = rankingWithBeforeCoverage(0.50).incoming(grid, start = 3, bars = 2)
         assertEquals(0.0, belowCutoff.startChange)
         assertEquals(0.8, atCutoff.startChange, absoluteTolerance = 1e-12)
+    }
+
+    /** A truncated onset envelope must not turn missing frames into a measured activity drop. */
+    @Test
+    fun cueRankingIgnoresUncoveredOnsetComparisons() {
+        val measured = withBarEnergy(song(List(8) { 4 }), List(8) { -12.0 })
+        val grid = measured.barTracking!!.grid()
+        val boundary = grid.beats.at(grid.boundary(3))
+        val onsetHop = 0.02
+        val onsetOffset = 0.011
+        val cutoffFrame = ceil((boundary + 4.0 * 0.50 - onsetOffset) / onsetHop).toInt()
+        val fullEnvelope =
+            FloatArray(ceil(measured.audio.durationSeconds / onsetHop).toInt()) {
+                if (onsetOffset + it * onsetHop < boundary) 1.0f else 0.0f
+            }
+        val fullAudio =
+            measured.audio.copy(
+                onsetEnvelope = fullEnvelope,
+                onsetHopSeconds = onsetHop,
+                onsetTimeOffsetSeconds = onsetOffset,
+            )
+        val belowCutoffAudio =
+            fullAudio.copy(
+                onsetEnvelope = fullEnvelope.copyOf(cutoffFrame - 1)
+            )
+        val atCutoffAudio =
+            fullAudio.copy(
+                onsetEnvelope = fullEnvelope.copyOf(cutoffFrame)
+            )
+
+        val belowCutoff =
+            MusicalCueRanking(belowCutoffAudio, belowCutoffAudio)
+                .incoming(grid, start = 3, bars = 2)
+        val atCutoff =
+            MusicalCueRanking(atCutoffAudio, atCutoffAudio)
+                .incoming(grid, start = 3, bars = 2)
+
+        assertEquals(0.0, belowCutoff.startChange)
+        assertTrue(atCutoff.startChange < 0.0)
     }
 
     @Test
