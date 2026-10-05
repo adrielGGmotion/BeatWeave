@@ -8,6 +8,49 @@ import kotlin.test.assertFailsWith
 
 class MixerTimelineTest {
     @Test
+    fun transitionPreservesSingleStemLevelOutsideTheFade() {
+        val rate = 22050
+        val source = ConstantPcm(8.0)
+        val grid = BeatGrid(DoubleArray(16) { it * 0.5 })
+        val mix =
+            BeatMixer()
+                .prepare(
+                    source,
+                    source,
+                    MixPlan(
+                        grid,
+                        grid,
+                        firstBeat = 2,
+                        secondBeat = 2,
+                        crossfadeBeats = 4,
+                        outputSampleRate = rate,
+                    ),
+                )
+        try {
+            fun sampleAt(seconds: Double): Float {
+                var result = Float.NaN
+                mix.renderFrames(
+                    object : PcmSink {
+                        override fun write(interleavedStereo: FloatArray, frames: Int) {
+                            assertEquals(1, frames)
+                            result = interleavedStereo[0]
+                        }
+                    },
+                    (seconds * rate).roundToLong(),
+                    (seconds * rate).roundToLong() + 1,
+                )
+                return result
+            }
+
+            assertEquals(0.25f, sampleAt(0.5), 1e-7f, "Outgoing level changed before fade")
+            assertEquals(0.25f, sampleAt(2.0), 1e-7f, "Matched stems changed midpoint level")
+            assertEquals(0.25f, sampleAt(3.5), 1e-7f, "Incoming level changed after fade")
+        } finally {
+            mix.close()
+        }
+    }
+
+    @Test
     fun acceptedLateCueCanReadAndRenderItsTailBeyondFourHours() {
         val rate = 22050
         val first = ConstantPcm(4.0 * 60 * 60)

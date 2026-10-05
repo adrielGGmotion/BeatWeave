@@ -591,9 +591,13 @@ internal constructor(
                         0.0,
                         1.0,
                     )
-                // Equal-power curve with enough headroom for correlated normalized tracks.
-                val gainA = if (mode == MixMode.OVERLAP) 0.46 else cos(fade * PI / 2) / sqrt(2.0)
-                val gainB = if (mode == MixMode.OVERLAP) 0.46 else sin(fade * PI / 2) / sqrt(2.0)
+                // A constant-sum sine-squared crossfade keeps either stem at unity outside the
+                // fade and cannot exceed the two input samples' range when they are correlated.
+                // The former / sqrt(2) headroom attenuated every single-stem region by 3.01 dB.
+                val gainB =
+                    if (mode == MixMode.OVERLAP) 0.46
+                    else sin(fade * PI / 2).let { it * it }
+                val gainA = if (mode == MixMode.OVERLAP) 0.46 else 1.0 - gainB
                 output[2 * i] = (output[2 * i] * gainA + incoming[2 * i] * gainB).toFloat()
                 output[2 * i + 1] =
                     (output[2 * i + 1] * gainA + incoming[2 * i + 1] * gainB).toFloat()

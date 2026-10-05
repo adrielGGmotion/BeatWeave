@@ -9,6 +9,8 @@
 - Allow incoming pitch shifts during mixer preparation without repeating the
   stretch pass; existing calls continue to preserve pitch.
 - Preserve primary mixer failures when prepared-audio cleanup also fails.
+- Keep transition-mode stems at unity gain outside the fade and use a bounded,
+  constant-sum sine-squared crossfade instead of attenuating the whole mix by 3 dB.
 - Render accepted mix timelines beyond four hours while retaining four-hour
   source limits and bounded PCM reads.
 - Avoid a phantom source frame when converting a sample-derived duration back
