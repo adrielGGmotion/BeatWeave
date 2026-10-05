@@ -22,6 +22,7 @@ data class Analysis(
     val peakDb: Double,
     val spectralCentroidHz: Double,
     val keyEstimate: String,
+    /** Separation from the strongest harmonically incompatible key profile, not a probability. */
     val keyConfidence: Double,
     val energyBlocks: List<EnergyBlock>,
     val onsetEnvelope: FloatArray,
@@ -293,9 +294,8 @@ class MusicAnalyzer {
         val mean = chroma.average()
         val spread = sqrt(chroma.sumOf { (it - mean).pow(2) })
         if (spread < 1e-9) return "unknown" to 0.0
-        var top = Double.NEGATIVE_INFINITY
-        var second = Double.NEGATIVE_INFINITY
-        var label = "unknown"
+        data class KeyProfile(val root: Int, val minor: Boolean, val label: String, val score: Double)
+        val candidates = ArrayList<KeyProfile>(24)
         for (root in 0..11) for ((profile, mode) in listOf(major to "major", minor to "minor")) {
             val pm = profile.average()
             var dot = 0.0
@@ -305,13 +305,31 @@ class MusicAnalyzer {
                 pn += (profile[j] - pm).pow(2)
             }
             val corr = dot / max(1e-9, spread * sqrt(pn))
-            if (corr > top) {
-                second = top
-                top = corr
-                label = "${names[root]} $mode"
-            } else if (corr > second) second = corr
+            candidates += KeyProfile(root, mode == "minor", "${names[root]} $mode", corr)
         }
-        return label to (top - second).coerceIn(0.0, 1.0)
+        val best = candidates.maxBy { it.score }
+        // Relative major/minor and same-mode fourth/fifth alternatives are acceptable for the
+        // only confidence-sensitive consumer: harmonic transition compatibility. Their close
+        // profile scores must not masquerade as uncertainty about that compatibility class.
+        val incompatible =
+            candidates
+                .asSequence()
+                .filterNot { harmonicallyCompatible(best.root, best.minor, it.root, it.minor) }
+                .maxOf { it.score }
+        return best.label to (best.score - incompatible).coerceIn(0.0, 1.0)
+    }
+
+    private fun harmonicallyCompatible(
+        firstRoot: Int,
+        firstMinor: Boolean,
+        secondRoot: Int,
+        secondMinor: Boolean,
+    ): Boolean {
+        val interval = (firstRoot - secondRoot + 12) % 12
+        if (firstMinor == secondMinor) return interval == 0 || interval == 5 || interval == 7
+        val majorRoot = if (firstMinor) secondRoot else firstRoot
+        val minorRoot = if (firstMinor) firstRoot else secondRoot
+        return (minorRoot - majorRoot + 12) % 12 == 9
     }
 
     private fun db(value: Double): Double = 20.0 * log10(max(value, 1e-8))
