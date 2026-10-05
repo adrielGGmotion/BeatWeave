@@ -213,11 +213,19 @@ class MusicAnalyzer {
         val hann = DoubleArray(windowSize) { 0.5 - 0.5 * cos(2.0 * PI * it / (windowSize - 1)) }
         val real = DoubleArray(windowSize)
         val imag = DoubleArray(windowSize)
-        val frameChroma = DoubleArray(12)
-        val chroma = DoubleArray(12)
+        // Retain sub-semitone position until the whole recording has supplied a tuning estimate.
+        // Folding directly to twelve bins assumes A440 and can turn a globally detuned major
+        // chord into its relative/neighboring minor key near the half-semitone boundary.
+        val fineBinsPerSemitone = KEY_FINE_BINS_PER_SEMITONE
+        val fineSize = 12 * fineBinsPerSemitone
+        val frameChroma = DoubleArray(fineSize)
+        val fineChroma = DoubleArray(fineSize)
+        val frameConcertChroma = DoubleArray(12)
+        val concertChroma = DoubleArray(12)
         for (base in -windowSize / 2 until pcm.size step hop) {
             cancellationCheck()
             frameChroma.fill(0.0)
+            frameConcertChroma.fill(0.0)
             for (i in 0 until windowSize) {
                 real[i] = if (base + i in pcm.indices) pcm[base + i] * hann[i] else 0.0
                 imag[i] = 0.0
@@ -228,17 +236,50 @@ class MusicAnalyzer {
                 if (hz < 55.0) continue
                 if (hz > 2000.0) break
                 val midi = 69.0 + 12.0 * ln(hz / 440.0) / ln(2.0)
-                val lower = floor(midi).toInt()
-                val fraction = midi - lower
+                val fine = midi * fineBinsPerSemitone
+                val lower = floor(fine).toInt()
+                val fraction = fine - lower
                 val power = real[bin] * real[bin] + imag[bin] * imag[bin]
-                frameChroma[((lower % 12) + 12) % 12] += power * (1.0 - fraction)
-                frameChroma[(((lower + 1) % 12) + 12) % 12] += power * fraction
+                frameChroma[((lower % fineSize) + fineSize) % fineSize] +=
+                    power * (1.0 - fraction)
+                frameChroma[(((lower + 1) % fineSize) + fineSize) % fineSize] +=
+                    power * fraction
+                val concertLower = floor(midi).toInt()
+                val concertFraction = midi - concertLower
+                frameConcertChroma[((concertLower % 12) + 12) % 12] +=
+                    power * (1.0 - concertFraction)
+                frameConcertChroma[(((concertLower + 1) % 12) + 12) % 12] +=
+                    power * concertFraction
             }
             val norm = sqrt(frameChroma.sumOf { it * it })
             if (norm > 1e-12) {
-                for (pitchClass in chroma.indices)
-                    chroma[pitchClass] += frameChroma[pitchClass] / norm
+                for (bin in fineChroma.indices) fineChroma[bin] += frameChroma[bin] / norm
             }
+            val concertNorm = sqrt(frameConcertChroma.sumOf { it * it })
+            if (concertNorm > 1e-12) {
+                for (pitchClass in concertChroma.indices)
+                    concertChroma[pitchClass] += frameConcertChroma[pitchClass] / concertNorm
+            }
+        }
+        var tuningX = 0.0
+        var tuningY = 0.0
+        for (bin in fineChroma.indices) {
+            val angle = 2.0 * PI * (bin % fineBinsPerSemitone) / fineBinsPerSemitone
+            tuningX += fineChroma[bin] * cos(angle)
+            tuningY += fineChroma[bin] * sin(angle)
+        }
+        val tuningConcentration =
+            hypot(tuningX, tuningY) / max(1e-12, fineChroma.sum())
+        // An incoherent spectrum must not manufacture an arbitrary global tuning correction.
+        if (tuningConcentration < MINIMUM_KEY_TUNING_CONCENTRATION) return concertChroma
+        val tuningBins = atan2(tuningY, tuningX) / (2.0 * PI) * fineBinsPerSemitone
+        val chroma = DoubleArray(12)
+        for (bin in fineChroma.indices) {
+            val corrected = (bin - tuningBins) / fineBinsPerSemitone
+            val lower = floor(corrected).toInt()
+            val fraction = corrected - lower
+            chroma[((lower % 12) + 12) % 12] += fineChroma[bin] * (1.0 - fraction)
+            chroma[(((lower + 1) % 12) + 12) % 12] += fineChroma[bin] * fraction
         }
         return chroma
     }
@@ -320,3 +361,6 @@ class MusicAnalyzer {
         }
     }
 }
+
+private const val KEY_FINE_BINS_PER_SEMITONE = 12
+private const val MINIMUM_KEY_TUNING_CONCENTRATION = 0.10
