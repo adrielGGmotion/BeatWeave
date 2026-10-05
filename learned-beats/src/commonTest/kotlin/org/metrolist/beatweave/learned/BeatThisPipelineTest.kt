@@ -60,6 +60,34 @@ class BeatThisPipelineTest {
     }
 
     @Test
+    fun orderedDownbeatMatchingPreservesEarlierBeatOnAnExactTie() {
+        val beats = FloatArray(100) { -5f }.also {
+            it[20] = 4f
+            it[26] = 4f
+        }
+        val downbeats = FloatArray(100) { -5f }.also { it[23] = 4f }
+
+        val result = BeatThisAnalyzer.postprocess(BeatThisLogits(beats, downbeats))
+
+        assertEquals(listOf(.4, .52), result.first.map { it.seconds })
+        assertEquals(listOf(.4), result.second)
+    }
+
+    @Test
+    fun cancellationInterruptsPostprocessing() {
+        var checks = 0
+        val logits = BeatThisLogits(FloatArray(10_000) { 1f }, FloatArray(10_000) { 1f })
+
+        assertFailsWith<IllegalStateException> {
+            BeatThisAnalyzer.postprocess(logits) {
+                if (++checks == 3) error("cancel")
+            }
+        }
+
+        assertEquals(3, checks)
+    }
+
+    @Test
     fun flatZeroActivationsDoNotInventBeats() {
         val result = BeatThisAnalyzer.postprocess(BeatThisLogits(FloatArray(100), FloatArray(100)))
         assertTrue(result.first.isEmpty())

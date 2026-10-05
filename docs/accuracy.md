@@ -20,7 +20,8 @@ contribution is also neutral unless both comparison windows contain enough measu
 boundary frames are weighted by their exact overlap with the requested window.
 Positive downbeat peaks are attached to the canonical beat clock only within the model's
 three-frame (60 ms) observation tolerance; more distant peaks remain unsupported instead of being
-moved onto unrelated beats.
+moved onto unrelated beats. The ordered peak clocks are matched in linear time, with cooperative
+cancellation retained through postprocessing on long recordings.
 The 0.10.0 measurements below predate that change;
 they do not measure its musical quality. The new scores do not classify choruses,
 drops or vocal overlap. Compare its rendered choices by listening before treating

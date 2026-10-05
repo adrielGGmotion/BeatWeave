@@ -54,7 +54,7 @@ class BeatThisAnalyzer(
         val spectrogram = frontend.transform(mono22050, cancellationCheck)
         onProgress(0.25)
         val logits = infer(spectrogram, cancellationCheck) { onProgress(0.25 + 0.75 * it) }
-        val (beats, downbeats) = postprocess(logits)
+        val (beats, downbeats) = postprocess(logits, cancellationCheck)
         // Reflect padding may produce a final frame at the exact audio end. It is not playable.
         val duration = mono22050.size / 22050.0
         return LearnedBeatAnalysis(
@@ -128,11 +128,22 @@ class BeatThisAnalyzer(
          * attached only when an observed beat lies within the model's +/-3-frame tolerance;
          * distant peaks remain unsupported rather than being moved onto an unrelated pulse.
          */
-        fun postprocess(logits: BeatThisLogits): Pair<List<Beat>, List<Double>> {
-            require(logits.beat.all { it.isFinite() } && logits.downbeat.all { it.isFinite() })
+        fun postprocess(logits: BeatThisLogits): Pair<List<Beat>, List<Double>> =
+            postprocess(logits) {}
+
+        fun postprocess(
+            logits: BeatThisLogits,
+            cancellationCheck: () -> Unit,
+        ): Pair<List<Beat>, List<Double>> {
+            cancellationCheck()
+            for (i in logits.beat.indices) {
+                if (i % POSTPROCESS_CANCELLATION_INTERVAL == 0) cancellationCheck()
+                require(logits.beat[i].isFinite() && logits.downbeat[i].isFinite())
+            }
             fun peaks(values: FloatArray): List<Double> {
                 val selected = ArrayList<Int>()
                 for (i in values.indices) {
+                    if (i % POSTPROCESS_CANCELLATION_INTERVAL == 0) cancellationCheck()
                     if (values[i] <= 0f) continue
                     var maximum = true
                     for (j in max(0, i - 3)..min(values.lastIndex, i + 3)) {
@@ -169,19 +180,34 @@ class BeatThisAnalyzer(
                     Beat(frame / 50.0, score.toFloat())
                 }
             if (beats.isEmpty()) return beats to emptyList()
+            val downbeatFrames = peaks(logits.downbeat)
+            var nearestBeat = 0
+            val snappedDownbeats = ArrayList<Double>(downbeatFrames.size)
+            for ((downbeatIndex, frame) in downbeatFrames.withIndex()) {
+                if (downbeatIndex % POSTPROCESS_CANCELLATION_INTERVAL == 0) cancellationCheck()
+                while (nearestBeat < beatFrames.lastIndex) {
+                    val currentDistance = abs(beatFrames[nearestBeat] - frame)
+                    val nextDistance = abs(beatFrames[nearestBeat + 1] - frame)
+                    // minBy retained the earlier beat on an exact tie; preserve that behavior.
+                    if (nextDistance >= currentDistance) break
+                    nearestBeat++
+                    if (nearestBeat % POSTPROCESS_CANCELLATION_INTERVAL == 0)
+                        cancellationCheck()
+                }
+                beatFrames[nearestBeat].takeIf {
+                    abs(it - frame) <= MAX_DOWNBEAT_BEAT_DISTANCE_FRAMES
+                }?.let(snappedDownbeats::add)
+            }
             val downbeats =
-                peaks(logits.downbeat)
-                    .mapNotNull { frame ->
-                        beatFrames.minBy { abs(it - frame) }.takeIf {
-                            abs(it - frame) <= MAX_DOWNBEAT_BEAT_DISTANCE_FRAMES
-                        }
-                    }
+                snappedDownbeats
                     .map { it / 50.0 }
                     .distinct()
                     .sorted()
+            cancellationCheck()
             return beats to downbeats
         }
     }
 }
 
 private const val MAX_DOWNBEAT_BEAT_DISTANCE_FRAMES = 3.0
+private const val POSTPROCESS_CANCELLATION_INTERVAL = 1024
