@@ -138,7 +138,7 @@ class MusicAnalyzer {
                 real[i] = if (base + i in pcm.indices) pcm[base + i] * hann[i] else 0.0
                 imag[i] = 0.0
             }
-            fft(real, imag)
+            analysisFft(real, imag, cancellationCheck)
             var novelty = 0.0
             var magnitudeRise = 0.0
             var magnitudeTotal = 0.0
@@ -233,7 +233,7 @@ class MusicAnalyzer {
                 real[i] = if (base + i in pcm.indices) pcm[base + i] * hann[i] else 0.0
                 imag[i] = 0.0
             }
-            fft(real, imag)
+            analysisFft(real, imag, cancellationCheck)
             for (bin in 1 until windowSize / 2) {
                 val hz = bin.toDouble() * sampleRate / windowSize
                 if (hz < 55.0) continue
@@ -336,52 +336,69 @@ class MusicAnalyzer {
 
     private fun db(value: Double): Double = 20.0 * log10(max(value, 1e-8))
 
-    private fun fft(re: DoubleArray, im: DoubleArray) {
-        val n = re.size
-        var j = 0
-        for (i in 1 until n) {
-            var bit = n shr 1
-            while (j and bit != 0) {
-                j = j xor bit
-                bit = bit shr 1
-            }
+}
+
+/** In-place forward radix-two FFT used by onset and key analysis. */
+internal fun analysisFft(
+    re: DoubleArray,
+    im: DoubleArray,
+    cancellationCheck: () -> Unit,
+) {
+    val n = re.size
+    cancellationCheck()
+    var j = 0
+    for (i in 1 until n) {
+        if (i and (ANALYSIS_FFT_CANCELLATION_OPERATIONS - 1) == 0) cancellationCheck()
+        var bit = n shr 1
+        while (j and bit != 0) {
             j = j xor bit
-            if (i < j) {
-                val t = re[i]
-                re[i] = re[j]
-                re[j] = t
-                val u = im[i]
-                im[i] = im[j]
-                im[j] = u
+            bit = bit shr 1
+        }
+        j = j xor bit
+        if (i < j) {
+            val t = re[i]
+            re[i] = re[j]
+            re[j] = t
+            val u = im[i]
+            im[i] = im[j]
+            im[j] = u
+        }
+    }
+    var len = 2
+    while (len <= n) {
+        val angle = -2.0 * PI / len
+        val wr = cos(angle)
+        val wi = sin(angle)
+        val cancellationStride = max(len, ANALYSIS_FFT_CANCELLATION_OPERATIONS * 2)
+        for (base in 0 until n step len) {
+            var cr = 1.0
+            var ci = 0.0
+            for (k in 0 until len / 2) {
+                if (
+                    if (len <= ANALYSIS_FFT_CANCELLATION_OPERATIONS * 2) {
+                        k == 0 && base and (cancellationStride - 1) == 0
+                    } else {
+                        k and (ANALYSIS_FFT_CANCELLATION_OPERATIONS - 1) == 0
+                    }
+                ) cancellationCheck()
+                val a = base + k
+                val b = a + len / 2
+                val vr = re[b] * cr - im[b] * ci
+                val vi = re[b] * ci + im[b] * cr
+                re[b] = re[a] - vr
+                im[b] = im[a] - vi
+                re[a] += vr
+                im[a] += vi
+                val nr = cr * wr - ci * wi
+                ci = cr * wi + ci * wr
+                cr = nr
             }
         }
-        var len = 2
-        while (len <= n) {
-            val angle = -2.0 * PI / len
-            val wr = cos(angle)
-            val wi = sin(angle)
-            for (base in 0 until n step len) {
-                var cr = 1.0
-                var ci = 0.0
-                for (k in 0 until len / 2) {
-                    val a = base + k
-                    val b = a + len / 2
-                    val vr = re[b] * cr - im[b] * ci
-                    val vi = re[b] * ci + im[b] * cr
-                    re[b] = re[a] - vr
-                    im[b] = im[a] - vi
-                    re[a] += vr
-                    im[a] += vi
-                    val nr = cr * wr - ci * wi
-                    ci = cr * wi + ci * wr
-                    cr = nr
-                }
-            }
-            len = len shl 1
-        }
+        len = len shl 1
     }
 }
 
 private const val KEY_FINE_BINS_PER_SEMITONE = 12
 private const val MINIMUM_KEY_TUNING_CONCENTRATION = 0.10
 private const val PCM_CANCELLATION_INTERVAL = 65536
+private const val ANALYSIS_FFT_CANCELLATION_OPERATIONS = 32768
