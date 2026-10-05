@@ -128,12 +128,11 @@ object MainBeatProjectionRegression {
                                         ((time - plan.startSeconds) /
                                                 (plan.fadeEndSeconds - plan.startSeconds))
                                             .coerceIn(0.0, 1.0)
-                                    val gainA =
-                                        if (mode == MixMode.OVERLAP) .46
-                                        else cos(fade * PI / 2) / sqrt(2.0)
                                     val gainB =
                                         if (mode == MixMode.OVERLAP) .46
-                                        else sin(fade * PI / 2) / sqrt(2.0)
+                                        else sin(fade * PI / 2).let { it * it }
+                                    val gainA =
+                                        if (mode == MixMode.OVERLAP) .46 else 1.0 - gainB
                                     val expected = (left[i] * gainA + right[i] * gainB).toFloat()
                                     check(interleavedStereo[i] == expected)
                                     val absolute = global + i / 2
