@@ -126,6 +126,49 @@ class BeatClockRegularizerTest {
     }
 
     @Test
+    fun cancellationIsPolledWithinEveryLongOptimizerSweep() {
+        val size = 10_000
+        val outgoing = BeatGrid(DoubleArray(size) { 0.2 + it * 0.05 })
+        val incoming =
+            BeatGrid(
+                DoubleArray(size) {
+                    0.3 + it * 0.05 + if (it in 1 until size - 1) 0.004 * sin(it * 1.9) else 0.0
+                }
+            )
+        val plan = MixPlan(outgoing, incoming, 0)
+        val duration = incoming.at(size - 1) + 0.05
+
+        fun run(maximumSweeps: Int): Pair<BeatClockFitResult, Int> {
+            var polls = 0
+            val fit =
+                BeatClockRegularizer.regularize(
+                    plan,
+                    duration,
+                    ClockFitOptions(
+                        convergenceToleranceSeconds = 1e-15,
+                        maximumSweeps = maximumSweeps,
+                    ),
+                    isCancelled = {
+                        polls++
+                        false
+                    },
+                )
+            return fit to polls
+        }
+
+        val (oneSweep, oneSweepPolls) = run(1)
+        val (twoSweeps, twoSweepPolls) = run(2)
+
+        assertEquals(1, oneSweep.report.sweeps)
+        assertEquals(2, twoSweeps.report.sweeps)
+        assertTrue(
+            twoSweepPolls - oneSweepPolls >= 8,
+            "A 10,000-anchor optimizer sweep added only " +
+                "${twoSweepPolls - oneSweepPolls} cancellation polls",
+        )
+    }
+
+    @Test
     fun releasedTransitionDoesNotFitOrJudgeIntentionalPostFadeDivergence() {
         val plan =
             jittered()
