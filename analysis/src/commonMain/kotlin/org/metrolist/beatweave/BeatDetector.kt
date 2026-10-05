@@ -250,6 +250,8 @@ internal object BeatDetector {
         val radius = max(1, (5.0 / step).roundToInt())
         val centres = (x.indices step stride).toList()
         val periods = DoubleArray(centres.size)
+        val initializationSeconds = 30.0
+        val initializationTightness = 2.0
         var previous = period
         for ((index, centre) in centres.withIndex()) {
             cancellationCheck()
@@ -267,7 +269,15 @@ internal object BeatDetector {
                     cross += x[i] * x[i - lag]
                     energy += x[i] * x[i]
                 }
-                val score = cross / max(1e-9, energy) - 6.0 * ln(lag / previous).pow(2)
+                // A rhythmically misleading intro can ratchet the first local estimates away
+                // before a reliable preceding window exists. Anchor tracker initialization to
+                // the full-track pulse, then leave established mid-song tempo adaptation alone.
+                val initializationAnchor =
+                    if (centre * step < initializationSeconds) initializationTightness else 0.0
+                val score =
+                    cross / max(1e-9, energy) -
+                        6.0 * ln(lag / previous).pow(2) -
+                        initializationAnchor * ln(lag / period).pow(2)
                 if (score > bestScore) {
                     bestScore = score
                     best = lag.toDouble()

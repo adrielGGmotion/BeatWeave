@@ -45,6 +45,47 @@ class DetectorContractTest {
     }
 
     @Test
+    fun misleadingIntroCannotRatchetStableFullTrackPulse() {
+        val rate = 11025
+        val bpm = 136.055
+        val period = 60.0 / bpm
+        val durationSeconds = 65.0
+        val pcm = FloatArray((durationSeconds * rate).toInt())
+        val reference = buildList {
+            var time = 0.403
+            while (time < durationSeconds) {
+                add(time)
+                time += period
+            }
+        }
+        fun addClick(time: Double, amplitude: Double, tone: Double) {
+            val start = (time * rate).roundToInt()
+            for (sample in 0 until min(180, pcm.size - start)) {
+                pcm[start + sample] +=
+                    (amplitude * exp(-sample / 30.0) * sin(sample * tone)).toFloat()
+            }
+        }
+        reference.forEach { addClick(it, 0.4, 0.43) }
+        var distractor = 0.38
+        while (distractor < 23.0) {
+            addClick(distractor, 0.7, 0.89)
+            val introProgress = (distractor / 23.0).coerceIn(0.0, 1.0)
+            distractor += period + 0.075 * sin(PI * introProgress)
+        }
+
+        val analysis = MusicAnalyzer().analyze(pcm, rate)
+        assertTrue(analysis.beats.isNotEmpty())
+        val errors =
+            analysis.beats
+                .map { beat -> reference.minOf { abs(beat.seconds - it) } }
+                .sorted()
+        val p95 = errors[(errors.size * 95 / 100).coerceAtMost(errors.lastIndex)]
+
+        assertEquals(bpm, analysis.bpm, 0.2)
+        assertTrue(p95 < 0.030, "misleading intro moved the stable beat grid: p95=$p95")
+    }
+
+    @Test
     fun tempoOctaveUsesAlternatingPulseEvidenceWithoutConstrainingTheTempoRange() {
         fun analyzeClicks(bpm: Double, alternatingAmplitude: Double = 1.0): Analysis {
             val rate = 11025
