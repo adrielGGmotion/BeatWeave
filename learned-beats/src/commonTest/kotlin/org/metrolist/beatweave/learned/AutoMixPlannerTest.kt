@@ -299,25 +299,25 @@ class AutoMixPlannerTest {
         val grid = measured.barTracking!!.grid()
         val boundary = grid.beats.at(grid.boundary(3))
         val onsetHop = 0.02
-        val boundaryFrame = ceil(boundary / onsetHop).toInt()
+        val onsetOffset = 0.011
+        val cutoffFrame = ceil((boundary + 4.0 * 0.50 - onsetOffset) / onsetHop).toInt()
         val fullEnvelope =
             FloatArray(ceil(measured.audio.durationSeconds / onsetHop).toInt()) {
-                if (it * onsetHop < boundary) 1.0f else 0.0f
+                if (onsetOffset + it * onsetHop < boundary) 1.0f else 0.0f
             }
         val fullAudio =
             measured.audio.copy(
                 onsetEnvelope = fullEnvelope,
                 onsetHopSeconds = onsetHop,
+                onsetTimeOffsetSeconds = onsetOffset,
             )
         val belowCutoffAudio =
             fullAudio.copy(
-                onsetEnvelope =
-                    fullEnvelope.copyOf(boundaryFrame + (4.0 * 0.49 / onsetHop).roundToInt())
+                onsetEnvelope = fullEnvelope.copyOf(cutoffFrame - 1)
             )
         val atCutoffAudio =
             fullAudio.copy(
-                onsetEnvelope =
-                    fullEnvelope.copyOf(boundaryFrame + (4.0 * 0.50 / onsetHop).roundToInt())
+                onsetEnvelope = fullEnvelope.copyOf(cutoffFrame)
             )
 
         val belowCutoff =

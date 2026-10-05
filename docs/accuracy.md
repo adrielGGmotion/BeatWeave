@@ -11,7 +11,8 @@ are equal, enharmonic, relative major/minor or adjacent on the same-mode circle 
 fifths; tempo, spectral centroid, loudness and overlap-level gates must also pass.
 Dynamics changes require measured energy coverage on both sides; recording boundaries
 and energy gaps are neutral rather than being compared with the song-wide median. The onset
-contribution is also neutral unless both comparison windows contain enough measured frames.
+contribution is also neutral unless both comparison windows contain enough measured time;
+boundary frames are weighted by their exact overlap with the requested window.
 The 0.10.0 measurements below predate that change;
 they do not measure its musical quality. The new scores do not classify choruses,
 drops or vocal overlap. Compare its rendered choices by listening before treating
