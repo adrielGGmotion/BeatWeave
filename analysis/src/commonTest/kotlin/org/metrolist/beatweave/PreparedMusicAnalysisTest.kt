@@ -74,4 +74,32 @@ class PreparedMusicAnalysisTest {
         // Before validation-loop polling, the trailing NaN failed validation before check 3.
         assertEquals(3, checks)
     }
+
+    @Test
+    fun cancellationInterruptsMaximumKeyAnalysisFft() {
+        class Cancelled : RuntimeException()
+        val size = 262144
+        var checks = 0
+
+        assertFailsWith<Cancelled> {
+            analysisFft(DoubleArray(size), DoubleArray(size)) {
+                if (++checks == 10) throw Cancelled()
+            }
+        }
+
+        // This transform contains 2,359,296 butterflies plus bit reversal. Before polling was
+        // added inside the FFT, the entire operation ran between two preparation callbacks.
+        assertEquals(10, checks)
+    }
+
+    @Test
+    fun cancellableFftPreservesForwardTransform() {
+        val real = doubleArrayOf(1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+        val imaginary = DoubleArray(real.size)
+
+        analysisFft(real, imaginary) {}
+
+        assertContentEquals(DoubleArray(real.size) { 1.0 }, real)
+        assertContentEquals(DoubleArray(real.size), imaginary)
+    }
 }
