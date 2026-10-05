@@ -142,6 +142,7 @@ object BeatClockRegularizer {
                 candidate.secondOutputTime(0.0),
                 candidate.secondOutputTime(sourceDurationSeconds),
                 qualityLimits,
+                ::checkCancellation,
             )
         }
         val raw = plan.second.times

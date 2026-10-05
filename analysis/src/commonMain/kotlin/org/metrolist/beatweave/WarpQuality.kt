@@ -84,7 +84,17 @@ object WarpQuality {
         fromSeconds: Double = plan.startSeconds,
         toSeconds: Double = plan.fadeEndSeconds + if (plan.releaseAfterFade) 2.0 else 0.0,
         limits: WarpQualityLimits = WarpQualityLimits(),
+    ): WarpQualityReport = assess(plan, fromSeconds, toSeconds, limits) {}
+
+    /** Internal cancellable path used while automatic planning owns the operation. */
+    internal fun assess(
+        plan: MixPlan,
+        fromSeconds: Double,
+        toSeconds: Double,
+        limits: WarpQualityLimits,
+        cancellationCheck: () -> Unit,
     ): WarpQualityReport {
+        cancellationCheck()
         require(
             fromSeconds.isFinite() &&
                 toSeconds.isFinite() &&
@@ -96,30 +106,41 @@ object WarpQuality {
         // Five-millisecond sampling resolves an 80 ms duplicate detection rather
         // than concealing it inside one average-BPM statistic. Include every beat
         // boundary so even very short malformed intervals are inspected.
-        val knots = mutableListOf(fromSeconds, toSeconds)
         val firstBeat = floor(plan.first.position(fromSeconds)).toInt()
         val lastBeat = ceil(plan.first.position(toSeconds)).toInt()
         require(lastBeat.toLong() - firstBeat <= 1_000_000) { "Unreasonable beat density" }
-        for (beat in firstBeat..lastBeat) {
-            val t = plan.first.at(beat)
-            if (t > fromSeconds && t < toSeconds) knots += t
+        var work = 0
+        fun checkWork() {
+            if (work and (WARP_QUALITY_CANCELLATION_INTERVAL - 1) == 0) cancellationCheck()
+            work++
         }
-        val sections = knots.sorted()
         fun inspect(t: Double) {
+            checkWork()
             val (speed, acceleration) = plan.secondClockRates(t)
             metrics.speed(speed, t)
             metrics.change(abs(acceleration / speed), t)
         }
-        for (section in 0 until sections.lastIndex) {
-            val start = sections[section]
-            val end = sections[section + 1]
+        fun inspectSection(start: Double, end: Double) {
             val count = max(8, ceil((end - start) / 0.005).toInt())
             for (i in 0 until count) {
                 val t = start + (end - start) * i / count
                 inspect(t)
             }
         }
+        // BeatGrid.at is ordered for ordered indices, so stream sections directly instead of
+        // materializing and sorting up to one million knots before cancellation can be observed.
+        var sectionStart = fromSeconds
+        for (beat in firstBeat..lastBeat) {
+            checkWork()
+            val boundary = plan.first.at(beat)
+            if (boundary > fromSeconds && boundary < toSeconds) {
+                inspectSection(sectionStart, boundary)
+                sectionStart = boundary
+            }
+        }
+        inspectSection(sectionStart, toSeconds)
         inspect(toSeconds)
+        cancellationCheck()
         return metrics.report()
     }
 
@@ -225,3 +246,5 @@ object WarpQuality {
         }
     }
 }
+
+private const val WARP_QUALITY_CANCELLATION_INTERVAL = 4096
