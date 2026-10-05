@@ -119,6 +119,8 @@ class UnsafeClockFitException(val report: ClockFitReport) :
  * correctness or audio quality.
  */
 object BeatClockRegularizer {
+    private const val OPTIMIZER_CANCELLATION_INTERVAL = 4096
+
     fun regularize(
         plan: MixPlan,
         sourceDurationSeconds: Double,
@@ -325,10 +327,29 @@ object BeatClockRegularizer {
         var kkt = Double.POSITIVE_INFINITY
         while (sweeps < options.maximumSweeps) {
             checkCancellation()
-            for (i in 0 until count) update(i)
-            for (i in count - 1 downTo 0) update(i)
+            var sweepWork = 0
+            fun checkSweepWork() {
+                if (
+                    sweepWork != 0 &&
+                        sweepWork and (OPTIMIZER_CANCELLATION_INTERVAL - 1) == 0
+                )
+                    checkCancellation()
+                sweepWork++
+            }
+            for (i in 0 until count) {
+                checkSweepWork()
+                update(i)
+            }
+            for (i in count - 1 downTo 0) {
+                checkSweepWork()
+                update(i)
+            }
             sweeps++
-            kkt = (0 until count).maxOf { abs(displacement[it] - projected(it)) }
+            kkt = 0.0
+            for (i in 0 until count) {
+                checkSweepWork()
+                kkt = max(kkt, abs(displacement[i] - projected(i)))
+            }
             if (!kkt.isFinite() || kkt <= options.convergenceToleranceSeconds) break
         }
         val converged = kkt.isFinite() && kkt <= options.convergenceToleranceSeconds
