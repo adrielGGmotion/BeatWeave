@@ -365,22 +365,19 @@ internal fun analysisFft(
         }
     }
     var len = 2
+    var butterfliesUntilCancellation = 0
     while (len <= n) {
         val angle = -2.0 * PI / len
         val wr = cos(angle)
         val wi = sin(angle)
-        val cancellationStride = max(len, ANALYSIS_FFT_CANCELLATION_OPERATIONS * 2)
         for (base in 0 until n step len) {
             var cr = 1.0
             var ci = 0.0
             for (k in 0 until len / 2) {
-                if (
-                    if (len <= ANALYSIS_FFT_CANCELLATION_OPERATIONS * 2) {
-                        k == 0 && base and (cancellationStride - 1) == 0
-                    } else {
-                        k and (ANALYSIS_FFT_CANCELLATION_OPERATIONS - 1) == 0
-                    }
-                ) cancellationCheck()
+                if (butterfliesUntilCancellation == 0) {
+                    cancellationCheck()
+                    butterfliesUntilCancellation = ANALYSIS_FFT_CANCELLATION_OPERATIONS
+                }
                 val a = base + k
                 val b = a + len / 2
                 val vr = re[b] * cr - im[b] * ci
@@ -392,6 +389,7 @@ internal fun analysisFft(
                 val nr = cr * wr - ci * wi
                 ci = cr * wi + ci * wr
                 cr = nr
+                butterfliesUntilCancellation--
             }
         }
         len = len shl 1
