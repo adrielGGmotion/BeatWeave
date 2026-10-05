@@ -186,6 +186,35 @@ class AutoMixPlannerTest {
     }
 
     @Test
+    fun highConfidenceHarmonicNeighborsAndEnharmonicNamesCanUseLongBlends() {
+        val measured = withBarEnergy(song(List(40) { 4 }), List(40) { -12.0 })
+        fun keyed(name: String) =
+            measured.copy(audio = measured.audio.copy(keyEstimate = name, keyConfidence = 0.2))
+
+        for (
+            (first, second) in
+                listOf("B minor" to "E minor", "A# major" to "Bb major", "C major" to "A minor")
+        ) {
+            val selection =
+                assertNotNull(
+                    LocalMixPlanner.bestTransition(keyed(first), keyed(second)).automaticSelection
+                )
+            assertEquals(16, selection.barCount)
+            assertTrue(assertNotNull(selection.musicalCueEvidence).longBlendAffinity > 0.9)
+        }
+        val lowConfidence =
+            measured.copy(
+                audio = measured.audio.copy(keyEstimate = "B minor", keyConfidence = 0.1)
+            )
+        val guarded =
+            assertNotNull(
+                LocalMixPlanner.bestTransition(lowConfidence, keyed("E minor")).automaticSelection
+            )
+        assertTrue(guarded.barCount < 16)
+        assertEquals(0.0, assertNotNull(guarded.musicalCueEvidence).longBlendAffinity)
+    }
+
+    @Test
     fun aMatchingTempoAloneDoesNotTriggerAnExtendedBlend() {
         val first = withBarEnergy(song(List(40) { 4 }), List(40) { -12.0 })
         val second = withBarEnergy(song(List(40) { 4 }), List(40) { -20.0 })
