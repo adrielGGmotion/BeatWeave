@@ -8,6 +8,7 @@ import java.nio.FloatBuffer
 import java.security.MessageDigest
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
+import java.util.concurrent.locks.LockSupport
 
 /**
  * Fully local CPU inference. Owns its session; use .use { ... } or close(). Inference and close are
@@ -97,25 +98,21 @@ class OrtBeatThisBackend(modelBytes: ByteArray, threads: Int = 2) :
         val cancellation = AtomicReference<Throwable?>(null)
         val watcher =
             Thread {
-                try {
-                    while (!completed.get()) {
-                        Thread.sleep(CANCELLATION_POLL_MILLIS)
-                        if (completed.get()) break
-                        try {
-                            cancellationCheck()
-                        } catch (failure: Throwable) {
-                            if (cancellation.compareAndSet(null, failure)) {
-                                try {
-                                    runOptions.setTerminate(true)
-                                } catch (terminationFailure: Throwable) {
-                                    failure.addSuppressed(terminationFailure)
-                                }
+                while (!completed.get()) {
+                    LockSupport.parkNanos(CANCELLATION_POLL_NANOS)
+                    if (completed.get()) break
+                    try {
+                        cancellationCheck()
+                    } catch (failure: Throwable) {
+                        if (cancellation.compareAndSet(null, failure)) {
+                            try {
+                                runOptions.setTerminate(true)
+                            } catch (terminationFailure: Throwable) {
+                                failure.addSuppressed(terminationFailure)
                             }
-                            break
                         }
+                        break
                     }
-                } catch (_: InterruptedException) {
-                    // Normal completion interrupts the sleeping watcher so it exits immediately.
                 }
             }
         watcher.name = "BeatWeave-ORT-cancellation"
@@ -132,7 +129,7 @@ class OrtBeatThisBackend(modelBytes: ByteArray, threads: Int = 2) :
         } finally {
             completed.set(true)
             if (watcherStarted) {
-                watcher.interrupt()
+                LockSupport.unpark(watcher)
                 joinUninterruptibly(watcher)
             }
             runOptions.close()
@@ -203,4 +200,4 @@ class OrtBeatThisBackend(modelBytes: ByteArray, threads: Int = 2) :
     }
 }
 
-private const val CANCELLATION_POLL_MILLIS = 25L
+private const val CANCELLATION_POLL_NANOS = 25_000_000L
