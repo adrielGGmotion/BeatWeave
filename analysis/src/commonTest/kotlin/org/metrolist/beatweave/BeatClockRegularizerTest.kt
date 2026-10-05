@@ -43,6 +43,19 @@ class BeatClockRegularizerTest {
         assertTrue(fit.report.projectedResidualSeconds <= 1e-9)
         assertFalse(fit.report.originalQuality.accepted)
         assertTrue(fit.report.adjustedQuality.accepted)
+        val errors =
+            fit.adjustments
+                .mapNotNull { it.originalAnchorOutputResidualSeconds?.let(::abs) }
+                .sorted()
+        val p95Coordinate = (errors.size - 1) * 0.95
+        val p95Low = floor(p95Coordinate).toInt()
+        val p95High = ceil(p95Coordinate).toInt()
+        val expectedP95 =
+            errors[p95Low] +
+                (p95Coordinate - p95Low) * (errors[p95High] - errors[p95Low])
+        assertEquals(expectedP95, fit.report.originalAnchorOutputResidualP95Seconds, 0.0)
+        assertEquals(errors.last(), fit.report.maximumOriginalAnchorOutputResidualSeconds, 0.0)
+        assertEquals(errors.size, fit.report.observedAnchorCount)
         for (item in fit.adjustments) {
             assertTrue(abs(item.displacementSeconds) <= item.allowedDisplacementSeconds + 1e-12)
             if (item.pinned) assertEquals(item.originalSourceSeconds, item.adjustedSourceSeconds)
@@ -166,6 +179,38 @@ class BeatClockRegularizerTest {
             "A 10,000-anchor optimizer sweep added only " +
                 "${twoSweepPolls - oneSweepPolls} cancellation polls",
         )
+    }
+
+    @Test
+    fun cancellationInterruptsLongClockReportSorting() {
+        val size = 10_000
+        val grid = BeatGrid(DoubleArray(size) { 0.2 + it * 0.05 })
+        val plan = MixPlan(grid, grid, 0)
+        val duration = grid.at(size - 1) + 0.05
+        var qualityPolls = 0
+        WarpQuality.assess(
+            plan,
+            plan.secondOutputTime(0.0),
+            plan.secondOutputTime(duration),
+            WarpQualityLimits(),
+        ) {
+            qualityPolls++
+        }
+
+        val reportLoopPolls = (size + 4095) / 4096
+        val cancelAt = qualityPolls + 3 + reportLoopPolls + 2
+        var polls = 0
+        assertFailsWith<MixCancelledException> {
+            BeatClockRegularizer.regularize(
+                plan,
+                duration,
+                isCancelled = { ++polls >= cancelAt },
+            )
+        }
+
+        // The threshold is after initial quality assessment, report materialization and the
+        // sort's entry poll, so cancellation must be observed within the residual merge sort.
+        assertEquals(cancelAt, polls)
     }
 
     @Test

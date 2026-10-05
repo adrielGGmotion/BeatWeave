@@ -120,6 +120,7 @@ class UnsafeClockFitException(val report: ClockFitReport) :
  */
 object BeatClockRegularizer {
     private const val OPTIMIZER_CANCELLATION_INTERVAL = 4096
+    private const val REPORT_CANCELLATION_INTERVAL = 4096
 
     fun regularize(
         plan: MixPlan,
@@ -204,9 +205,16 @@ object BeatClockRegularizer {
         ): BeatClockFitResult {
             checkCancellation()
             val adjusted = candidate.second.times
-            val adjustments =
-                raw.indices.map { i ->
-                    val expected = if (active[i]) outputTimes[i] else null
+            val adjustments = ArrayList<BeatClockAdjustment>(raw.size)
+            val errors = DoubleArray(if (upper >= lower) upper - lower + 1 else 0)
+            var errorIndex = 0
+            var maximumDisplacement = 0.0
+            var maximumError = 0.0
+            for (i in raw.indices) {
+                if (i and (REPORT_CANCELLATION_INTERVAL - 1) == 0) checkCancellation()
+                val expected = if (active[i]) outputTimes[i] else null
+                val error = expected?.let { candidate.secondOutputTime(raw[i]) - it }
+                adjustments +=
                     BeatClockAdjustment(
                         i,
                         raw[i],
@@ -214,21 +222,23 @@ object BeatClockRegularizer {
                         bounds[i],
                         bounds[i] == 0.0,
                         expected,
-                        expected?.let { candidate.secondOutputTime(raw[i]) - it },
+                        error,
                     )
+                maximumDisplacement = max(maximumDisplacement, abs(adjusted[i] - raw[i]))
+                error?.let {
+                    val absolute = abs(it)
+                    errors[errorIndex++] = absolute
+                    maximumError = max(maximumError, absolute)
                 }
-            val errors =
-                adjustments
-                    .mapNotNull { it.originalAnchorOutputResidualSeconds?.let(::abs) }
-                    .sorted()
-            val p95 = quantile(errors, 0.95)
-            val maximum = errors.lastOrNull() ?: 0.0
+            }
+            check(errorIndex == errors.size)
+            val p95 = quantile(errors, 0.95, ::checkCancellation)
             val measuredQuality = if (candidate === plan) originalQuality else quality(candidate)
             val issues = failures.toMutableList()
             if (!measuredQuality.accepted) issues += ClockFitFailureCode.UNSAFE_CLOCK
             if (
                 p95 > options.maximumOutputResidualP95Seconds + 1e-9 ||
-                    maximum > options.maximumOutputResidualSeconds + 1e-9
+                    maximumError > options.maximumOutputResidualSeconds + 1e-9
             )
                 issues += ClockFitFailureCode.ORIGINAL_ANCHOR_RESIDUAL_EXCEEDED
             return BeatClockFitResult(
@@ -241,9 +251,9 @@ object BeatClockRegularizer {
                     kkt,
                     before,
                     after,
-                    adjustments.maxOf { abs(it.displacementSeconds) },
+                    maximumDisplacement,
                     p95,
-                    maximum,
+                    maximumError,
                     errors.size,
                     originalQuality,
                     measuredQuality,
@@ -378,11 +388,57 @@ object BeatClockRegularizer {
         )
     }
 
-    private fun quantile(sorted: List<Double>, probability: Double): Double {
-        if (sorted.isEmpty()) return 0.0
-        val coordinate = (sorted.size - 1) * probability
+    private fun quantile(
+        values: DoubleArray,
+        probability: Double,
+        cancellationCheck: () -> Unit,
+    ): Double {
+        if (values.isEmpty()) return 0.0
+        cancellationCheck()
+        var source = values
+        var destination = DoubleArray(values.size)
+        var width = 1
+        var work = 0
+        while (width < values.size) {
+            var start = 0
+            while (start < values.size) {
+                val middle = min(start + width, values.size)
+                val end = min(start + width * 2, values.size)
+                var left = start
+                var right = middle
+                var index = start
+                while (left < middle && right < end) {
+                    if (source[left].compareTo(source[right]) <= 0) {
+                        destination[index++] = source[left++]
+                    } else {
+                        destination[index++] = source[right++]
+                    }
+                    work++
+                    if (work and (REPORT_CANCELLATION_INTERVAL - 1) == 0)
+                        cancellationCheck()
+                }
+                while (left < middle) {
+                    destination[index++] = source[left++]
+                    work++
+                    if (work and (REPORT_CANCELLATION_INTERVAL - 1) == 0)
+                        cancellationCheck()
+                }
+                while (right < end) {
+                    destination[index++] = source[right++]
+                    work++
+                    if (work and (REPORT_CANCELLATION_INTERVAL - 1) == 0)
+                        cancellationCheck()
+                }
+                start = end
+            }
+            val swap = source
+            source = destination
+            destination = swap
+            width *= 2
+        }
+        val coordinate = (source.size - 1) * probability
         val low = floor(coordinate).toInt()
         val high = ceil(coordinate).toInt()
-        return sorted[low] + (coordinate - low) * (sorted[high] - sorted[low])
+        return source[low] + (coordinate - low) * (source[high] - source[low])
     }
 }
