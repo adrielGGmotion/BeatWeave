@@ -74,8 +74,8 @@ was exercised; Apple builds and runtime were not. Declared iOS targets do not
 include iOS inference or stretching adapters.
 
 Supplied-song checks also found coverage regressions. In 0.10, both models rendered
-a 16-bar *Yeah, No â Somebody Told Me* transition, but declined full shared
-beat-only overlap. Both declined a requested 16-bar *The Last Page â Homicide Love*
+a 16-bar *Yeah, No → Somebody Told Me* transition, but declined full shared
+beat-only overlap. Both declined a requested 16-bar *The Last Page → Homicide Love*
 transition, while accepting 2, 4 and 8 bars. These recordings have no independent
 beat/bar annotations in the project, so render success does not establish musical
 accuracy, and rejection does not establish that a transition would sound bad.
