@@ -300,3 +300,17 @@ original canonical spans still undergo pulse/acoustic checks. These APIs do not
 infer the provider's interpretation. `declaredMainSelection` retains its provenance
 and original/prepared correspondences. Additional `pinnedIncomingBeats` use
 original incoming canonical indices and must refer to selected main beats.
+# Experimental manual transition training
+
+The optional `AutoMixSearchOptions(cueModel = TrainedCueModel(...))` ranks musical
+cue candidates using locally trained preferences. The default remains unchanged;
+beat/bar/clock acceptance gates still apply. The current three-pair pilot overfits
+and is not a general-purpose automix model. Its volume, EQ and filter training is
+an offline experiment, not yet production playback automation. See
+[manual training](../tools/manual-automix/README.md) for reproduction and limits.
+
+The follow-up [corpus training experiment](../tools/corpus-automix/README.md)
+downloads its own music/annotation data, trains portable phase and timing-prior
+models, and evaluates on held-out recordings. Its acoustic cue proposals and
+listening renderer remain offline. The timing prior is weak and no new expert
+fader policy was learned; these checkpoints are not enabled by this API.
