@@ -10,7 +10,7 @@ FPS=4
 BINS=32
 
 def decode(path,rate=RATE):
-    return np.frombuffer(subprocess.check_output(['ffmpeg','-v','error','-i',str(path),
+    return np.frombuffer(subprocess.check_output(['ffmpeg','-nostdin','-v','error','-i',str(path),
         '-ac','1','-ar',str(rate),'-f','f32le','-']),dtype='<f4').copy()
 
 def spectrum(audio):

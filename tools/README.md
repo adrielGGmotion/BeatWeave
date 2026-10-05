@@ -69,3 +69,8 @@ Independent experimental automix training is documented in
 [handoff-automix](handoff-automix/README.md). It includes conditional bar-phase
 training, estimated fader supervision from real mixes, a time-only ablation and
 separated listening controls. Its checkpoints are not production-enabled.
+
+[preference-automix](preference-automix/README.md) fine-tunes faders from the
+listener's actual selections and seals a reproducible automatic test runner.
+It preserves the existing cue planner and acceptance limits, records the first
+result, and exposes no manual timing or volume override for the next test.

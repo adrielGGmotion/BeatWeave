@@ -1,0 +1,58 @@
+#!/usr/bin/env python3
+"""Package preference-training evidence and the immutable automatic test release."""
+import argparse,base64,hashlib,html,json,zipfile
+from pathlib import Path
+import numpy as np
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+
+def report(out):
+    read=lambda name:json.loads((out/name).read_text())
+    embed=lambda p,mime:'data:'+mime+';base64,'+base64.b64encode(p.read_bytes()).decode()
+    f=read('fader-training-results.json');base=read('profile-baseline-results.json');feedback=read('feedback.json');listen=read('listening-results.json');verification=read('verification.json')
+    old=[r['before']['gain_mae'] for r in f['leave_one_pair_out']];new=[r['after']['gain_mae'] for r in f['leave_one_pair_out']];simple=[r['gain_mae'] for r in base['leave_one_pair_out']]
+    fig,ax=plt.subplots(figsize=(9,3.4),layout='constrained');x=np.arange(3);w=.24
+    for shift,values,label,color in [(-w,old,'Previous audio model','#9aa8ae'),(0,new,'Preference-trained model','#155d72'),(w,simple,'Mean-profile baseline','#bf7230')]:ax.bar(x+shift,values,w,label=label,color=color)
+    ax.set(xticks=x,xticklabels=['yes baby → Sandstorm','Mantra → Subway','Love Me Like You Do → Closer'],ylabel='Amplitude gain MAE · lower is better',title='Leave one whole pair out of training')
+    ax.set_ylim(0,.70);ax.legend(frameon=False,fontsize=9);ax.spines[['top','right']].set_visible(False)
+    fig.savefig(out/'preference-evaluation.png',dpi=150);plt.close(fig)
+    pairs=[]
+    for p in listen['pairs']:
+        clips=''.join(f'<div class="take"><strong>{label}</strong><audio controls preload="none" src="{embed(out/p[key],"audio/ogg")}"></audio></div>' for label,key in [('Your selected version','original_audio'),('Newly trained volume · same selected timing','trained_audio')])
+        pairs.append(f'<section class="pair"><h3>{p["pair"]}. {html.escape(p["title"])}</h3>{clips}</section>')
+    external=''.join(f'<tr><td>{r["split"]} example {r["id"]}</td><td>{r["before"]["spectral_mae_db"]:.3f}</td><td>{r["after"]["spectral_mae_db"]:.3f}</td></tr>' for r in f['external_regression'])
+    picks=''.join(f'<tr><td>{html.escape(p["title"])}</td><td>{p["ordinal"]}</td><td>{html.escape(p["variant"])}</td></tr>' for p in feedback['pairs'])
+    freeze=verification['frozen_release_sha256'];smoke=read('automatic-smoke/result.json')['plan']
+    text='''<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>BeatWeave — preference update and frozen test</title><style>
+*{box-sizing:border-box}body{margin:0;background:#f0f3f4;color:#19303b;font:16px/1.6 system-ui,sans-serif}main{max-width:1050px;margin:auto;padding:40px 24px}h1{font-size:clamp(30px,5vw,48px);line-height:1.12;letter-spacing:-1px}h2{margin-top:38px;font-size:25px}h3{font-size:18px}.tag{font-size:12px;letter-spacing:2px;text-transform:uppercase;color:#426570;font-weight:700}.status{border-left:4px solid #155d72;background:#dfecee;padding:14px 20px}.note{border-left:4px solid #b4793c;background:#f5eadb;padding:14px 20px}table{width:100%;border-collapse:collapse;font-size:14px}th,td{padding:10px 12px;text-align:left;border-bottom:1px solid #d3dfe0}th{background:#e0e8ea}.pair{background:white;border:1px solid #d4e0e4;border-radius:10px;padding:14px 22px;margin:20px 0}.take{display:grid;grid-template-columns:1fr 330px;align-items:center;gap:20px;padding:15px 0;border-top:1px solid #e3e8ea}audio{width:100%;height:40px}img{width:100%;height:auto;background:white;margin:20px 0;border-radius:8px}a{color:#155d72}code{overflow-wrap:anywhere;font-size:12px}.scroll{overflow:auto}small,footer{font-size:13px;color:#536d77}li{margin:8px 0}footer{margin:35px 0}@media(max-width:720px){main{padding:24px 15px}.take{grid-template-columns:1fr;gap:9px}table{font-size:12px}td,th{padding:7px}}</style><main>
+<header><div class="tag">BeatWeave · Preference round 4 · 5 October 2026</div><h1>Your picks are now training examples.<br>The next test is frozen.</h1><p class="status">The fader network was fine-tuned using your three selections, with seven independent DJ transitions replayed during fitting. The automatic runner, model files and rendering settings are sealed before you provide the next audio.</p></header>
+<h2>The choices used</h2><div class="scroll"><table><thead><tr><th>Pair</th><th>Chosen audio</th><th>Actual prior variant</th></tr></thead><tbody>'''+picks+'''</tbody></table></div><p>All three choices retain the earlier volume behavior and omit the EQ/filter effects. Pairs 1 and 3 also retain the preferred bar-timing adjustment. These are three independent preferences; frames from the same transition are not counted as independent human ratings.</p>
+<h2>What was trained</h2><p>The entire 5,450-parameter audio-conditioned fader network was updated. It predicts outgoing and incoming amplitude levels from source audio features, transition progress and duration. Targets are the gain traces of the versions you selected. Their origin is your earlier transition designs: this is explicitly personal imitation training.</p>'''
+    text+=f'<p>{f["optimization"]["changed_parameters"]:,} parameters changed. Training used a fixed 160-iteration CPU optimization budget, masked Huber loss, a parameter anchor, and a 2:1 weighting between your examples and replay examples. It reached the preset iteration limit; numerical convergence is not claimed.</p>'
+    text+='<h2>Evaluation, including the stronger baseline</h2>'
+    text+=f'<p>Excluding each whole pair from its corresponding fit, mean gain error changes from <strong>{np.mean(old):.3f}</strong> for the previous network to <strong>{np.mean(new):.3f}</strong> for the updated network. A simple mean of the other approved profiles reaches <strong>{np.mean(simple):.3f}</strong>, which is better on these three similar preferences.</p>'
+    text+=f'<img alt="Old, updated and mean-profile fader error when each pair is held out" src="{embed(out/"preference-evaluation.png","image/png")}">'
+    text+='''<p class="note">The update learns your selected envelopes more closely, but these results do not establish that audio conditioning beats a simple personal profile. The frozen experimental runner uses the audio-conditioned network with independent replay; it is not presented as a proven best model. The new audio will be a fresh test.</p><p>The earlier external mixes were already inspected in the previous round. They remain excluded from training, but this is a retention regression, not a new untouched benchmark. Spectral error is not a listening-quality score.</p><table><thead><tr><th>Earlier independent mix</th><th>Before · dB MAE</th><th>After · dB MAE</th></tr></thead><tbody>'''+external+'''</tbody></table><p>The two earlier test mixes improve slightly on average; the earlier validation mix gets worse. Both outcomes are retained.</p>
+<h2>Controlled listening comparisons</h2><p>These use your selected timing to isolate the volume update. They are training-material auditions, <strong>not automatic cue-selection tests</strong>. Your chosen audio is copied unchanged; the new render uses the same export gain. No EQ or filter effects are added.</p>'''+''.join(pairs)+'''
+<h2>The fixed automatic test</h2><ol><li>You supply the audio inputs.</li><li>The runner verifies the frozen code and model hashes, decodes the complete sources, and records their hashes.</li><li>The existing library planner chooses cues and bar count with its original acceptance limits.</li><li>The preference-trained faders and fixed renderer produce the first output. If planning declines, that failure is retained.</li></ol><p>No cue, offset, bar-count, meter, EQ or volume override is exposed. No training runs during inference. No manual rescue or post-listening parameter change will be made for the first unseen test.</p><p>The short boundary join is fixed at about 17.5 ms, learned as the median release width measured from your selected control traces. Other fixed playback constraints are independent monotone gains, a 0–1 gain bound, pitch scale 1, and one constant anti-clipping export gain.</p>'''
+    text+=f'<p><strong>Freeze fingerprint · SHA-256</strong><br><code>{freeze}</code></p>'
+    text+='<h3>Automatic development smoke test</h3>'
+    text+=f'<p>Love Me Like You Do → Closer ran through the frozen automatic path. It selected A {smoke["a"]:.2f}s, B {smoke["b"]:.2f}s and {smoke["bars"]} bars ({smoke["duration"]:.2f}s). That differs from your preferred A 192.16s cue. No manual correction was made. This verifies execution, not musical quality, and these songs are not unseen.</p>'
+    text+=f'<audio controls preload="none" src="{embed(out/"automatic-smoke/automatic-transition.ogg","audio/ogg")}"></audio>'
+    text+='''<h2>What remains limited</h2><p>The cue scorer remains the earlier personal pilot model. Two selected previews are not exactly representable by the current fully observed automatic bar candidates: pair 1 extended past the last detected beat, and Subway has a conflicting inferred meter. A distant nearest cue was not used as a false positive training label. Cue selection and bar detection are therefore not claimed as newly trained improvements in this round.</p><p>Six new regressions pass, including analytical-gradient checks, masked-label behavior, frozen-checkpoint tampering rejection, no manual-offset CLI option, and continuous gain endpoints. The automatic smoke test and all three new comparison exports decode without clipping. The full production JVM/Android suite was not rerun for these experiment tools.</p><p>Incomplete intermediate decodes were found, rebuilt, and checked before sealing the release. Decoder control stdin is disabled; training files are validated before atomic replacement. All six regenerated canonical clocks exactly match the preceding round.</p><p>The separate R3 audition renderer samples the accepted continuous clock. The models are not enabled by default in the production library. Three personal examples and ten curated research examples are still a small evidence base.</p><p>The accompanying archive includes frozen weights and runtime artifacts, checksums, feedback, training-feature checkpoints, old/new metrics, comparison audio and notices. Research source audio is not redistributed. Code and reproduction instructions are in <a href="https://github.com/adrielGGmotion/BeatWeave/pull/8">PR #8</a>, under <code>tools/preference-automix</code>.</p><footer>Frozen before the next audio arrives. This report plays offline and sends no data.</footer></main></html>'''
+    path=out/'BeatWeave-preference-training-review.html';path.write_text(text)
+    archive=out/'BeatWeave-frozen-preference-model.zip'
+    paths=[p for p in out.rglob('*') if p.is_file() and p.suffix!='.zip' and p.name!='checksums.json']
+    (out/'checksums.json').write_text(json.dumps({str(p.relative_to(out)):hashlib.sha256(p.read_bytes()).hexdigest() for p in paths},indent=2)+'\n')
+    temporary=out.parent/('.'+archive.name+'.tmp')
+    with zipfile.ZipFile(temporary,'w',zipfile.ZIP_DEFLATED) as z:
+        for p in sorted(out.rglob('*')):
+            if p.is_file() and p.suffix!='.zip':z.write(p,p.relative_to(out))
+    with zipfile.ZipFile(temporary) as z:
+        if z.testzip() is not None:raise ValueError('Archive integrity check failed')
+    temporary.replace(archive)
+    print(json.dumps({'report_bytes':path.stat().st_size,'archive_bytes':archive.stat().st_size,'players':text.count('<audio ')}))
+
+if __name__=='__main__':
+    p=argparse.ArgumentParser();p.add_argument('out',type=Path);a=p.parse_args();report(a.out)
