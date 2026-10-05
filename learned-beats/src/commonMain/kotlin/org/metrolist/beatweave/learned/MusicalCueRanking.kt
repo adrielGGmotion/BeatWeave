@@ -223,9 +223,16 @@ internal class MusicalCueRanking(first: Analysis, second: Analysis) {
         fun quiet(time: Double): Double = ((median - level(time)) / 8.0).coerceIn(-1.0, 1.0)
 
         fun change(time: Double, window: Double): Double {
-            val before = meanDb(time - window, time)
-            val after = meanDb(time, time + window)
-            val energy = ((after - before) / 6.0).coerceIn(-1.0, 1.0)
+            val before = measuredDb(time - window, time)
+            val after = measuredDb(time, time + window)
+            // Near a recording boundary (or a feature gap), the missing side previously fell
+            // back to the song-wide median. That manufactures a lift/release from absent audio.
+            // Require substantial measured context on both sides before claiming a change.
+            if (
+                before.coveredSeconds < window * MINIMUM_CHANGE_CONTEXT_FRACTION ||
+                    after.coveredSeconds < window * MINIMUM_CHANGE_CONTEXT_FRACTION
+            ) return 0.0
+            val energy = ((after.db - before.db) / 6.0).coerceIn(-1.0, 1.0)
             val activity =
                 if (meanActivity <= 1e-9) 0.0
                 else
@@ -235,10 +242,15 @@ internal class MusicalCueRanking(first: Analysis, second: Analysis) {
             return (0.8 * energy + 0.2 * activity).coerceIn(-1.0, 1.0)
         }
 
-        private fun meanDb(from: Double, to: Double): Double {
+        private data class MeasuredLevel(val db: Double, val coveredSeconds: Double)
+
+        private fun meanDb(from: Double, to: Double): Double =
+            measuredDb(from, to).let { if (it.coveredSeconds > 0.0) it.db else median }
+
+        private fun measuredDb(from: Double, to: Double): MeasuredLevel {
             val start = from.coerceIn(0.0, duration)
             val end = to.coerceIn(0.0, duration)
-            if (end <= start || blocks.isEmpty()) return median
+            if (end <= start || blocks.isEmpty()) return MeasuredLevel(median, 0.0)
             fun area(time: Double, prefix: DoubleArray, weighted: Boolean): Double {
                 var low = 0
                 var high = blocks.size
@@ -254,7 +266,7 @@ internal class MusicalCueRanking(first: Analysis, second: Analysis) {
             }
             val weighted = area(end, weightedEnergy, true) - area(start, weightedEnergy, true)
             val covered = area(end, coveredSeconds, false) - area(start, coveredSeconds, false)
-            return if (covered > 0) weighted / covered else median
+            return MeasuredLevel(if (covered > 0) weighted / covered else median, covered)
         }
 
         private fun meanOnset(from: Double, to: Double): Double {
@@ -269,3 +281,5 @@ internal class MusicalCueRanking(first: Analysis, second: Analysis) {
         }
     }
 }
+
+private const val MINIMUM_CHANGE_CONTEXT_FRACTION = 0.5

@@ -253,6 +253,25 @@ class AutoMixPlannerTest {
         assertEquals(0.15, fading.lengthPreference)
     }
 
+    /** Missing audio outside the recording must not be treated as a measured dynamics change. */
+    @Test
+    fun cueRankingDoesNotFabricateLiftsAtTrackBoundaries() {
+        val base = song(List(8) { 4 })
+        val measured =
+            withBarEnergy(
+                base,
+                listOf(-6.0) + List(6) { -24.0 } + listOf(-6.0),
+            )
+        val ranking = MusicalCueRanking(measured.audio, measured.audio)
+        val grid = measured.barTracking!!.grid()
+
+        val incomingAtStart = ranking.incoming(grid, start = 0, bars = 2)
+        val outgoingAtEnd = ranking.outgoing(grid, start = 6, bars = 2)
+
+        assertEquals(0.0, incomingAtStart.startChange)
+        assertEquals(0.0, outgoingAtEnd.endChange)
+    }
+
     @Test
     fun earlyBreakDoesNotDiscardMostOfTheOutgoingSong() {
         val outgoing =
