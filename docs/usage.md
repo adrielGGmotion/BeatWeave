@@ -153,6 +153,8 @@ favor an incoming lift and an outgoing release. When the global key estimate,
 tempo, spectral centroid and loudness agree, it also rewards longer spans whose
 measured levels stay balanced through the candidate overlap. This can select a
 16-bar blend for compatible recordings while keeping the clock and bar checks.
+For short candidates whose start/end analysis windows overlap, cue ranking discounts
+the shared fraction instead of counting one dynamics event twice.
 `autoTransition` ranks cues at its requested length (16 by default); it does not
 silently shorten the fade. If the shortlisted cues yield no accepted plan, the
 planner retries the earlier earliest-incoming, latest-outgoing scan within the

@@ -51,11 +51,15 @@ internal class MusicalCueRanking(
         val window = max(4.0, (to - from) / bars * 1.5)
         val entry = outgoing.change(from, window)
         val exit = outgoing.change(to, window)
+        // Endpoint contexts overlap when a fade is shorter than two windows. Discount their
+        // shared fraction so one dynamics event cannot count as two independent boundaries.
+        val independentBoundaries = ((to - from) / (2.0 * window)).coerceIn(0.0, 1.0)
         val position = from / outgoing.duration
         // A sharp mid-song break should not routinely discard the rest of an outgoing track.
         val late = ((position - 0.70) / 0.20).coerceIn(-1.0, 1.0)
         val score =
-            1.2 * max(0.0, -entry) + 0.45 * max(0.0, -exit) +
+            independentBoundaries *
+                (1.2 * max(0.0, -entry) + 0.45 * max(0.0, -exit)) +
                 1.1 * late + 0.15 * outgoing.quiet(to)
         return Part(score, entry, exit, 0.0, from, to)
     }
@@ -66,6 +70,7 @@ internal class MusicalCueRanking(
         val window = max(4.0, (to - from) / bars * 1.5)
         val entry = incoming.change(from, window)
         val exit = incoming.change(to, window)
+        val independentBoundaries = ((to - from) / (2.0 * window)).coerceIn(0.0, 1.0)
         val startLevel = incoming.measuredLevel(from)
         val endLevel = incoming.measuredLevel(to)
         val build =
@@ -75,7 +80,8 @@ internal class MusicalCueRanking(
         val position = from / incoming.duration
         val early = ((0.45 - position) / 0.4).coerceIn(-1.0, 1.0)
         val score =
-            2.0 * max(0.0, exit) + 0.65 * max(0.0, entry) +
+            independentBoundaries *
+                (2.0 * max(0.0, exit) + 0.65 * max(0.0, entry)) +
                 0.45 * build + 0.25 * incoming.quiet(from) + 0.25 * early
         return Part(score, entry, exit, build, from, to)
     }

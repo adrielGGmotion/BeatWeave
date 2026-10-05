@@ -18,6 +18,9 @@ Dynamics changes require measured energy coverage on both sides; recording bound
 and energy gaps are neutral rather than being compared with the song-wide median. The onset
 contribution is also neutral unless both comparison windows contain enough measured time;
 boundary frames are weighted by their exact overlap with the requested window.
+When a short candidate's endpoint-analysis windows overlap, their dynamics contribution is
+weighted by the non-overlapping fraction so one change is not counted as independent evidence at
+both ends of the fade.
 Positive downbeat peaks are attached to the canonical beat clock only within the model's
 three-frame (60 ms) observation tolerance; more distant peaks remain unsupported instead of being
 moved onto unrelated beats. The ordered peak clocks are matched in linear time, with cooperative
