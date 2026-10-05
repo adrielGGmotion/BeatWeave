@@ -101,6 +101,8 @@ accuracy, and rejection does not establish that a transition would sound bad.
 - The unreleased `PitchAnalyzer` estimates monophonic fundamental frequency; it
   does not extract a lead melody from a complete mix. Periodicity confidence is
   not a calibrated accuracy probability, and octave errors remain possible.
+  Stereo analysis uses one-decibel channel-selection hysteresis to avoid note
+  flicker from negligible balance changes; it does not separate stereo sources.
 - Nonzero pitch shifting uses offline Rubber Band R3 with linked stereo and
   optional formant preservation. It is not lossless and can introduce artifacts,
   especially at large shifts. Synthetic tone and stereo regressions do not

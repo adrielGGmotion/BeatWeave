@@ -102,7 +102,10 @@ class PitchAnalyzer(private val options: PitchAnalysisOptions = PitchAnalysisOpt
      * a band-limited resampler when rates differ, as required by [StereoPcm]. For each window the
      * channel with greater energy after DC removal is analyzed independently: averaging
      * antiphase stereo can erase a voice, while DC bias must not determine channel selection.
-     * A channel change can change the detected instrument; this is not stereo source separation.
+     * After the first window, the other channel must exceed the selected channel by one decibel
+     * before selection changes. This prevents tiny stereo-balance differences from alternating
+     * between panned instruments; a decisive level change can still select the other channel.
+     * This is not stereo source separation.
      * No decoder or source ownership is transferred.
      */
     fun analyze(
@@ -135,6 +138,7 @@ class PitchAnalyzer(private val options: PitchAnalysisOptions = PitchAnalysisOpt
         var cacheStart = -1L
         var cacheFrames = 0
         var stereoCache = FloatArray(0)
+        var selectedChannel = -1
         return analyzeWindows(layout, analysisSampleRate, duration, cancellationCheck) { start, window ->
             if (
                 cacheStart < 0L ||
@@ -172,9 +176,17 @@ class PitchAnalyzer(private val options: PitchAnalysisOptions = PitchAnalysisOpt
                 leftPower += left * left
                 rightPower += right * right
             }
-            val channel = if (rightPower > leftPower) 1 else 0
+            if (selectedChannel < 0) {
+                selectedChannel = if (rightPower > leftPower) 1 else 0
+            } else {
+                val selectedPower = if (selectedChannel == 0) leftPower else rightPower
+                val otherPower = if (selectedChannel == 0) rightPower else leftPower
+                if (otherPower > selectedPower * STEREO_CHANNEL_SWITCH_POWER_RATIO) {
+                    selectedChannel = 1 - selectedChannel
+                }
+            }
             for (i in window.indices)
-                window[i] = stereoCache[(offset + i) * 2 + channel].toDouble()
+                window[i] = stereoCache[(offset + i) * 2 + selectedChannel].toDouble()
         }
     }
 
@@ -319,6 +331,7 @@ class PitchAnalyzer(private val options: PitchAnalysisOptions = PitchAnalysisOpt
 
 private const val MAX_PITCH_DURATION_SECONDS = 4.0 * 60.0 * 60.0
 private const val MAX_PITCH_WINDOW_FRAMES = 262144
+private val STEREO_CHANNEL_SWITCH_POWER_RATIO = 10.0.pow(1.0 / 10.0)
 private val PITCH_NOTE_NAMES = arrayOf("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
 
 /** In-place radix-two FFT; the inverse includes its normalization. */
