@@ -1,4 +1,107 @@
-# Preference update and frozen automatic test
+# Preference training and automatic listening tests
+
+## Round 5: full-span faders and experimental cue training
+
+The latest feedback rejects abrupt outgoing cuts and fades beginning halfway
+through the overlap. `full_span_faders.py` changes the model's output from direct
+amplitude to two positive phase speeds, bounded to 0.5–1.5. Smoothed, integrated
+phase is normalized across the complete accepted transition. Cosine outgoing
+and sine incoming gains meet exactly at `[1, 0]` and `[0, 1]` and move throughout
+the overlap. There is no 17.5 ms forced release. Endpoints, monotonicity, smoothing
+and rate bounds are playback constraints; the audio-conditioned curve is learned.
+
+All 5,450 MLP parameters are optimized from the previous checkpoint; 5,440 change.
+Seven real DJ transitions from six mixes supervise the fit using checkpointed
+acoustic gain estimates projected into this full-span policy. These are neither
+new human knob logs nor new downloads. Old personal volume traces are excluded
+because the latest feedback supersedes their sharp endings. Mix-balanced masked
+Huber loss with a fixed parameter anchor falls from 0.546410 to 0.018682 in the
+preset 160 L-BFGS iterations. It reaches the iteration limit, not convergence.
+
+Three previously inspected external examples are retention checks, not fresh
+tests. New projected-target gain MAE is 0.0582 / 0.0827 / 0.0456; old is
+0.2622 / 0.0995 / 0.0818. A learned time-only profile scores
+0.0463 / 0.0585 / 0.0411, beating the audio-conditioned model on all three.
+Original mix spectral MAE improves on the validation example but slightly
+worsens on both earlier test examples. This does not establish a general
+advantage from audio conditioning or better musical quality.
+
+`train_cues_round5.py` genuinely fits a new cue scorer to five exact accepted
+acoustic windows. Homicide/Last Page has weight 0.35 for its lukewarm feedback;
+the other pairs have weight 1. A regularized 13-feature linear ranker replaces
+the pilot's quadratic capacity for this experiment (quadratic weights are zero).
+Listwise fitting uses other windows as unreviewed contrastive background, not
+human-rated bad transitions. Five leave-one-entire-pair-out fits are reported.
+The final model converges in 14 iterations with 12 nonzero linear weights.
+
+Exact approved windows may fall outside the supported bar grid. A training-only
+synthetic grid encodes their acoustic endpoints for feature extraction; it is
+never used as detected beat truth or inserted into playback candidates. The
+training build observes the actual production shortlist without changing its
+ranking, order or acceptance gates. For yes baby/Sandstorm, whose actual planner
+declines, background windows come from the older acoustic exporter instead;
+they are explicitly not supported automatic candidates. No nearest feasible
+cue is falsely labeled as the user's approval.
+
+Cue results regress on some pairs. The previous cue model remains the runner's
+default. A high rank for an off-grid reference is not successful cue selection.
+No new chorus/drop classifier, annotated downbeat model, or invented 16-bar
+preference is claimed. Fixing unsupported musical windows remains necessary.
+
+| Pair | Previous automatic plan | Experimental automatic plan |
+| --- | --- | --- |
+| Love Me Like You Do → Closer | 194.66 → 68.48 s, 8 bars | 194.66 → 28.06 s, 8 bars |
+| Homicide Love → The Last Page | 91.82 → 43.18 s, 4 bars | Same |
+| Yeah, No → Somebody Told Me | 145.32 → 3.96 s, 8 bars | Same |
+| yes baby → Sandstorm | NO_CONFIDENT_BAR_GRID | Same decline |
+| Mantra → Subway Surfers | 115.12 → 32.02 s, 8 bars | 127.42 → 56.02 s, 2 bars |
+
+These are planner bar counts and source cue seconds, not independent meter
+annotations. The candidate scoring report precedes final clock fitting; the
+table above records the actual accepted playback plans after all gates.
+
+`round5_compare.py` makes three conditions per accepted pair: previous cues and
+faders; previous cues with newly trained faders; experimental cues and new faders.
+All cues come from the automatic planner. Every condition uses the repaired R2
+renderer, one common export gain per pair and no EQ. Declines remain declines.
+All 12 exported previews decode to the exact expected duration with zero clipped
+samples; all eight new gain traces are strictly monotone with exact endpoints.
+Four new tests cover full-span behavior under extreme rate predictions, analytic
+gradients, unobservable target masking and invalid rates. The new two-input
+runner also reproduces the Yeah/Somebody automatic plan in an end-to-end smoke
+test. This is a known development pair, not unseen evaluation. No production
+library API is enabled and the complete JVM/Android suite was not rerun.
+
+Reproduce fitting from the separate round-5 evidence bundle (source audio is not
+needed for the cached-feature fits):
+
+```sh
+OPENBLAS_NUM_THREADS=2 python3 tools/preference-automix/full_span_faders.py ROUND5/previous ROUND5
+OPENBLAS_NUM_THREADS=2 python3 tools/preference-automix/train_cues_round5.py ROUND5
+OPENBLAS_NUM_THREADS=2 python3 -m unittest discover -s tools/preference-automix -p test_full_span.py -v
+```
+
+For new automatic auditions, use the bundle's frozen release with this source
+revision. The optional flag explicitly tests the experimental cue checkpoint;
+neither mode accepts manual cues, bar count, offset or gain overrides:
+
+```sh
+python3 tools/preference-automix/run_full_span.py outgoing.opus incoming.opus \
+  --release ROUND5/frozen --out NEW_EMPTY_DIRECTORY
+# Separate experiment, preserving the default run:
+python3 tools/preference-automix/run_full_span.py outgoing.opus incoming.opus \
+  --release ROUND5/frozen --out ANOTHER_EMPTY_DIRECTORY --experimental-cues
+```
+
+The release pins models, R2 renderer, engine and Python inference source hashes.
+Dependency checksums are preserved from the prior release. Native binaries remain
+platform-specific. Building a new release requires `build_renderer.py`,
+`build_training_engine.py PREVIOUS_FROZEN`, and
+`freeze_full_span.py PREVIOUS_FROZEN ROUND5`. Fresh candidate extraction uses the
+training engine's optional `beatweave.candidateFile` and `beatweave.referenceFile`
+JVM properties. Neither property is passed during automatic inference.
+
+## Earlier round 4 (historical)
 
 This round uses the user's actual listening choices from the preceding report:
 
