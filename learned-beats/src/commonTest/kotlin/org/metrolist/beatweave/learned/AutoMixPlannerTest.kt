@@ -121,6 +121,31 @@ class AutoMixPlannerTest {
     }
 
     @Test
+    fun trainedRankingChangesMusicalPreferenceWithoutOverridingClockRejection() {
+        val a=withBarEnergy(song(List(20) { 4 }),List(20) { -18.0 })
+        val b=withBarEnergy(song(List(20) { 4 }),List(20) { -18.0 })
+        val old=LocalMixPlanner.autoTransition(a,b,4).automaticSelection!!
+        val weights=DoubleArray(104).also { it[0]=-100.0;it[1]=100.0 }
+        val model=TrainedCueModel(DoubleArray(13),DoubleArray(13) { 1.0 },weights,"test-preference")
+        val learned=LocalMixPlanner.autoTransition(a,b,4,
+            searchOptions=AutoMixSearchOptions(cueModel=model)).automaticSelection!!
+        assertTrue(learned.outgoingStartBar < old.outgoingStartBar)
+        assertTrue(learned.incomingStartBar > old.incomingStartBar)
+        assertNull(old.cueModelId)
+        assertEquals("test-preference", learned.cueModelId)
+        val featureFree = LocalMixPlanner.bestTransition(song(List(20) { 4 }),song(List(20) { 4 }),
+            searchOptions=AutoMixSearchOptions(cueModel=model)).automaticSelection!!
+        assertNull(featureFree.cueModelId)
+        val unsafe=withBarEnergy(song(List(20) { 4 },.6),List(20) { -18.0 })
+        val failure=assertFailsWith<AutoMixPlanningException> {
+            LocalMixPlanner.autoTransition(a,unsafe,4,
+                qualityLimits=WarpQualityLimits(maximumPlaybackSpeed=1.01),
+                searchOptions=AutoMixSearchOptions(cueModel=model,maximumClockFits=1024))
+        }
+        assertEquals(AutoMixFailureCode.CLOCK_REJECTED,failure.report.failure)
+    }
+
+    @Test
     fun automaticBarSearchChoosesARangeContainingOriginalCanonicalPins() {
         val first = song(List(8) { 4 })
         val second = song(List(8) { 4 }, 0.41)

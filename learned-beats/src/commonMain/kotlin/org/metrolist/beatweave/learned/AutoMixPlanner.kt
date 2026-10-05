@@ -11,6 +11,8 @@ data class AutoMixSearchOptions(
     val maximumCandidatePairs: Int = 250_000,
     val maximumClockFits: Int = 64,
     val minimumOverlapBars: Int = 2,
+    /** Optional locally trained musical preference model. Defaults preserve existing ranking. */
+    val cueModel: TrainedCueModel? = null,
 ) {
     init {
         require(maximumCandidatePairs > 0 && maximumClockFits > 0)
@@ -104,6 +106,8 @@ data class AutoMixSelection(
     val incomingEndSeconds: Double,
     val search: AutoMixSearchReport,
     val musicalCueEvidence: MusicalCueEvidence? = null,
+    /** Present only when an opt-in model actually scored this candidate. */
+    val cueModelId: String? = null,
 )
 
 /**
@@ -294,7 +298,17 @@ object AutoMixPlanner {
                 search.compatible++
                 val measured = ranking.evidence(exit.part, entry.part, bars)
                 val evidence =
-                    if (ranking.available) measured
+                    if (ranking.available) {
+                        val model = search.options.cueModel
+                        if (model == null) measured
+                        else measured.copy(
+                            score = model.score(TrainedCueModel.features(
+                                exit.part, entry.part, measured, bars,
+                                first.audio.durationSeconds, second.audio.durationSeconds,
+                            )),
+                            cueModelId = model.modelId,
+                        )
+                    }
                     else {
                         // Only automatic length selection reaches this fallback; fixed lengths
                         // without audio features go straight to orderedTransition.
@@ -897,6 +911,7 @@ object AutoMixPlanner {
                 b.beats.at(b.boundary(incoming + bars)),
                 search.report(),
                 musicalCueEvidence,
+                musicalCueEvidence?.cueModelId,
             )
         return try {
             scopedPlan(

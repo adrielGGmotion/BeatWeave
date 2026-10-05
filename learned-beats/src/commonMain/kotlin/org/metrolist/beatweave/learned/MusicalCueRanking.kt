@@ -20,6 +20,8 @@ data class MusicalCueEvidence(
     val longBlendAffinity: Double = 0.0,
     /** Similarity of measured levels at corresponding positions within this overlap. */
     val overlapLevelBalance: Double = 0.0,
+    /** Null for the built-in scorer and feature-free fallbacks. */
+    val cueModelId: String? = null,
 )
 
 /** Ranks timing-safe bar ranges using changes in energy and onset activity on the source clock. */
