@@ -71,18 +71,17 @@ internal class MusicalCueRanking(first: Analysis, second: Analysis) {
     }
 
     fun evidence(out: Part, into: Part, bars: Int): MusicalCueEvidence {
-        val balance =
+        val averageMismatchDb =
             if (available) {
-                val difference =
-                    (0 until 8).sumOf { i ->
-                        val position = (i + 0.5) / 8.0
-                        abs(
-                            outgoing.level(out.from + (out.to - out.from) * position) -
-                                incoming.level(into.from + (into.to - into.from) * position)
-                        )
-                    } / 8.0
-                (1.0 - difference / 6.0).coerceIn(0.0, 1.0)
-            } else 0.0
+                (0 until 8).sumOf { i ->
+                    val position = (i + 0.5) / 8.0
+                    abs(
+                        outgoing.level(out.from + (out.to - out.from) * position) -
+                            incoming.level(into.from + (into.to - into.from) * position)
+                    )
+                } / 8.0
+            } else 6.0
+        val balance = (1.0 - averageMismatchDb / 6.0).coerceIn(0.0, 1.0)
         // An extended blend can carry two similar arrangements through several phrases. A short
         // fade benefits more from a decisive entry/exit lift. Avoid rewarding a long fade into a
         // section that is audibly winding down, even if the two levels happen to match.
@@ -102,7 +101,6 @@ internal class MusicalCueRanking(first: Analysis, second: Analysis) {
         // Beyond two decibels, however, a large lift previously won even when the selected songs
         // would hand over at conspicuously different levels. Keep this a ranking cost rather than
         // an acceptance gate: callers still receive the best timing-safe choice available.
-        val averageMismatchDb = 6.0 * (1.0 - balance)
         val levelPenalty =
             max(0.0, averageMismatchDb - UNPENALIZED_LEVEL_MISMATCH_DB) *
                 LEVEL_MISMATCH_SCORE_PER_DB
