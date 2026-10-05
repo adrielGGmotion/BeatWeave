@@ -99,7 +99,7 @@ internal object BeatDetector {
         // Competing metrical levels remain exposed; this preference is not proof of meter.
         fun ranked(c: TempoCandidate) = c.support * (1.0 + 0.12 * ln(c.bpm / 40.0))
         val sorted = candidates.sortedByDescending(::ranked).take(8)
-        val selected =
+        var selected =
             if (preferred != null) {
                 val near = sorted.filter { abs(ln(it.bpm / preferred)) < 0.055 }
                 near.maxByOrNull { it.support }
@@ -107,9 +107,68 @@ internal object BeatDetector {
             } else sorted.firstOrNull() ?: TempoCandidate(120.0, 0.0)
         if (selected.support < 0.03)
             return Result(0.0, emptyList(), envelope, sorted, 0.0, 0.0, true)
-        val period = 60.0 / selected.bpm / step
-        val reference = localPeriods(evidence, period, step, cancellationCheck)
-        val frameBeats = track(evidence, reference, period, cancellationCheck)
+        data class TrackedCandidate(
+            val reference: DoubleArray,
+            val frames: List<Int>,
+        )
+        val trackedCandidates = mutableMapOf<Double, TrackedCandidate>()
+        fun trackCandidate(candidate: TempoCandidate): TrackedCandidate =
+            trackedCandidates.getOrPut(candidate.bpm) {
+                val period = 60.0 / candidate.bpm / step
+                val reference = localPeriods(evidence, period, step, cancellationCheck)
+                TrackedCandidate(reference, track(evidence, reference, period, cancellationCheck))
+            }
+        fun octaveCandidate(candidate: TempoCandidate, multiplier: Double): TempoCandidate? {
+            val target = candidate.bpm * multiplier
+            return sorted
+                .filter { it.support >= 0.03 && abs(ln(it.bpm / target)) < 0.025 }
+                .maxByOrNull(::ranked)
+        }
+        fun alternatingPulseBalance(candidate: TempoCandidate): Double? {
+            val frames = trackCandidate(candidate).frames
+            if (frames.size < 8) return null
+            var even = 0.0
+            var odd = 0.0
+            var evenCount = 0
+            var oddCount = 0
+            for ((index, frame) in frames.withIndex()) {
+                if (index % 2 == 0) {
+                    even += envelope[frame]
+                    evenCount++
+                } else {
+                    odd += envelope[frame]
+                    oddCount++
+                }
+            }
+            if (evenCount == 0 || oddCount == 0) return null
+            val evenMean = even / evenCount
+            val oddMean = odd / oddCount
+            val strongest = max(evenMean, oddMean)
+            return if (strongest > 1e-9) min(evenMean, oddMean) / strongest else null
+        }
+        if (preferred == null) {
+            // Autocorrelation exposes several metrical levels. A fast candidate whose
+            // tracked pulses alternate strongly is subdivision evidence, while balanced
+            // alternating pulses support retaining (or promoting to) the faster level.
+            // This avoids a fixed dance-tempo range that would break genuine slow/fast music.
+            val balancedPulseThreshold = 0.85
+            if (selected.bpm > 160.0) {
+                val half = octaveCandidate(selected, 0.5)
+                if (half != null) {
+                    val balance = alternatingPulseBalance(selected)
+                    if (balance != null && balance < balancedPulseThreshold) selected = half
+                }
+            }
+            while (selected.bpm * 2.0 <= 240.0) {
+                val doubled = octaveCandidate(selected, 2.0) ?: break
+                val balance = alternatingPulseBalance(doubled) ?: break
+                if (balance < balancedPulseThreshold) break
+                selected = doubled
+            }
+        }
+        val tracked = trackCandidate(selected)
+        val reference = tracked.reference
+        val frameBeats = tracked.frames
         val corrected = refine(frameBeats, envelope, audio)
         val beats =
             corrected

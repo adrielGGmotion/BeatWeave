@@ -45,6 +45,33 @@ class DetectorContractTest {
     }
 
     @Test
+    fun tempoOctaveUsesAlternatingPulseEvidenceWithoutConstrainingTheTempoRange() {
+        fun analyzeClicks(bpm: Double, alternatingAmplitude: Double = 1.0): Analysis {
+            val rate = 11025
+            val durationSeconds = 30
+            val pcm = FloatArray(rate * durationSeconds)
+            val interval = 60.0 / bpm
+            var pulse = 0
+            var time = 0.0
+            while (time < durationSeconds) {
+                val sample = (time * rate).roundToInt()
+                val amplitude = if (pulse++ % 2 == 0) 1.0 else alternatingAmplitude
+                for (j in 0 until min(180, pcm.size - sample)) {
+                    pcm[sample + j] =
+                        (amplitude * exp(-j / 30.0) * sin(j * 0.43)).toFloat()
+                }
+                time += interval
+            }
+            return MusicAnalyzer().analyze(pcm, rate)
+        }
+
+        // Eighth-note subdivisions at 240 BPM carry an alternating 120-BPM accent grid.
+        assertEquals(120.0, analyzeClicks(240.0, alternatingAmplitude = 0.45).bpm, 0.3)
+        assertEquals(60.0, analyzeClicks(60.0).bpm, 0.3)
+        assertEquals(180.0, analyzeClicks(180.0).bpm, 0.3)
+    }
+
+    @Test
     fun importedModelAnchorsAreNotSmoothedOrReplaced() {
         val times =
             listOf(Beat(0.153, 0.8f), Beat(0.732, 0.9f), Beat(1.304, 0.7f), Beat(1.90, 0.9f))
