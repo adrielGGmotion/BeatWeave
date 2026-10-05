@@ -89,8 +89,9 @@ accuracy, and rejection does not establish that a transition would sound bad.
   optional formant preservation. It is not lossless and can introduce artifacts,
   especially at large shifts. Synthetic tone and stereo regressions do not
   establish transparent quality on arbitrary recordings.
-- BPM, key and meter are estimates. Half-time, double-time and downbeat phase can
-  remain ambiguous even when a clock is regular.
+- BPM, key and meter are estimates. Key chroma compensates for a consistent global tuning offset,
+  but low-confidence full mixes and local or changing tuning remain ambiguous. Half-time,
+  double-time and downbeat phase can remain ambiguous even when a clock is regular.
 - A successful plan passes the implemented evidence and timing checks. It can
   still use the wrong musical interpretation.
 - Matching applies to the plan's declared observed span. Outside it, overlap
