@@ -403,14 +403,30 @@ object AutomaticPulseSelector {
 
     private fun onsetAgreement(beats: List<Beat>, reference: Analysis): Double {
         val step = reference.onsetHopSeconds
-        if (beats.isEmpty() || reference.onsetEnvelope.isEmpty() || step <= 0 || !step.isFinite())
+        val offset = reference.onsetTimeOffsetSeconds
+        if (
+            beats.isEmpty() ||
+                reference.onsetEnvelope.isEmpty() ||
+                step <= 0 ||
+                !step.isFinite() ||
+                !offset.isFinite()
+        )
             return 0.0
         var count = 0
         for (beat in beats) {
-            val frame = (beat.seconds - reference.onsetTimeOffsetSeconds) / step
+            if (!beat.seconds.isFinite()) return 0.0
+            val frame = (beat.seconds - offset) / step
             val lo = max(0, ceil(frame - 0.055 / step).toInt())
             val hi = min(reference.onsetEnvelope.lastIndex, floor(frame + 0.055 / step).toInt())
-            if (lo <= hi && (lo..hi).any { reference.onsetEnvelope[it] >= 0.30f }) count++
+            if (
+                lo <= hi &&
+                    (lo..hi).any {
+                        reference.onsetEnvelope[it].let { value ->
+                            value.isFinite() && value >= 0.30f
+                        }
+                    }
+            )
+                count++
         }
         return count.toDouble() / beats.size
     }

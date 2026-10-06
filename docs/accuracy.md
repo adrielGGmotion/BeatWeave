@@ -33,7 +33,7 @@ three-frame (60 ms) observation tolerance; more distant peaks remain unsupported
 moved onto unrelated beats. The ordered peak clocks are matched in linear time, with cooperative
 cancellation retained through postprocessing on long recordings.
 Non-finite onset clocks and envelope values cannot provide independent audio support for inserting
-or relocating canonical pulses.
+or relocating canonical pulses, or inflate candidate onset agreement during pulse selection.
 The independent fallback beat clock must also have a finite recording duration and finite, strictly
 ordered observations inside that duration before it can confirm or repair the model pulse.
 Automatic pulse diagnostics report that missing-reference rejection without deriving phase, onset,
