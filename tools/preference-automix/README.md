@@ -389,3 +389,50 @@ and comparisons were rerun after repair.
 Source code is in Git. Weights, feature caches, compiled artifacts and listening
 outputs remain outside Git. Frozen binaries must retain the corresponding source
 reference and bundled third-party notices.
+# Round 7: opening-constrained timing update
+
+`train_opening_timing.py` makes a real, deliberately limited cue-model update.
+It fits the 14 linear/quadratic timing coefficients of the existing 104-weight
+scorer on Raveform's estimated DJ mix alignments. The 90 acoustic/cross terms,
+feature normalization, beat detectors, volume model and renderer remain fixed.
+Corpus examples contain no acoustic features: standardized acoustic values are
+held at zero for that objective. This is a timing prior, not chorus recognition.
+
+Only observations and generated alternatives whose incoming cue lies within
+`min(30 seconds, 10% of recording duration)` are eligible. All ten personal
+development works are excluded from the corpus. Mix IDs, recording IDs and
+normalized recording titles are disjoint across folds. DJ identity and alternate
+masters are not fully controlled. Raveform has been used in earlier experiments;
+the new split is not a never-seen benchmark.
+
+The fixed objective combines 90% corpus ranking and 10% personal replay with an
+L2 anchor of 0.5 to the previous experimental weights. Only the supported
+Yeah, No → Somebody Told Me approval survives both current policy and candidate
+availability. Old middle-of-song approvals and unavailable cue windows are not
+inserted as synthetic positives. Alternatives are unreviewed, not human-rated bad.
+
+This run used 511 training, 59 validation and 73 test transitions, each with nine
+options. Fourteen coefficients changed. Test top-1 increased from 5.5% to 8.2%,
+still below the 11.1% random baseline; validation top-1 decreased from 6.8% to
+5.1%. Test mean rank improved from 4.74 to 4.15. This is mixed timing-imitation
+evidence, not demonstrated musical improvement, so the checkpoint remains
+experimental and is not the default. No hyperparameter search was performed.
+
+```sh
+python3 tools/preference-automix/train_opening_timing.py \
+  RAVEFORM_ZIP OPENING_RELEASE_ROOT ROUND6_ROOT NEW_ROUND7_ROOT
+# Commit source before freezing the trained model.
+python3 tools/preference-automix/freeze_round7.py \
+  OPENING_RELEASE_ROOT/frozen NEW_ROUND7_ROOT
+python3 tools/preference-automix/round7_compare.py \
+  NEW_ROUND7_ROOT OPENING_RELEASE_ROOT
+python3 tools/preference-automix/run_ensemble.py outgoing.opus incoming.opus \
+  --release NEW_ROUND7_ROOT/frozen --experimental-cues --out NEW_EMPTY_DIRECTORY
+```
+
+The comparison retains every first automatic output/decline for all five pairs,
+with matching per-pair export gains, unchanged full-span faders, no EQ, and no
+cue/bar/offset overrides. The preceding opening model is the comparison baseline.
+Runtime models and research checkpoints remain outside Git; preserve their
+checksum manifests and third-party notices. Dataset attribution and source terms
+are documented in `../corpus-automix/README.md`.
