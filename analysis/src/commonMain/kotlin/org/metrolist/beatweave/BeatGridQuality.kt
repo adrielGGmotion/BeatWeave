@@ -350,7 +350,8 @@ object PulseNormalizer {
         )
         val inserts = ArrayList<Insert>()
         for ((left, right) in cleaned.zipWithNext()) {
-            val period = localPeriod(reference, (left.seconds + right.seconds) / 2) ?: continue
+            val period =
+                measuredLocalPeriod(reference, (left.seconds + right.seconds) / 2) ?: continue
             val ratio = (right.seconds - left.seconds) / period
             if (ratio < 1.48) continue
             val count = ratio.roundToInt()
