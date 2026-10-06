@@ -74,6 +74,15 @@ class BeatGridQualityTest {
         val beats = List(16) { Beat(0.25 + it * 0.5, 1.0f) }
         val reference = beats.take(3) + beats.takeLast(3)
 
+        assertTrue(
+            BeatGridQuality.audit(
+                    beats,
+                    referenceBeats = beats.filterIndexed { index, _ -> index != 8 },
+                    durationSeconds = 8.0,
+                )
+                .safeForAutomaticMix
+        )
+
         val report =
             BeatGridQuality.audit(beats, referenceBeats = reference, durationSeconds = 8.0)
 
