@@ -9,6 +9,62 @@ import kotlin.test.assertTrue
 
 class BeatGridQualityTest {
     @Test
+    fun unmeasuredReferenceGapCannotRaiseCanonicalAgreement() {
+        val intervals =
+            listOf(
+                0.615,
+                0.55,
+                0.45,
+                0.385,
+                0.385,
+                0.45,
+                0.55,
+                0.5,
+                0.5,
+                0.55,
+                0.615,
+                0.615,
+                0.55,
+                0.45,
+                0.385,
+            )
+        val modelBeats = buildList {
+            var seconds = 0.25
+            add(Beat(seconds, 1.0f))
+            for (interval in intervals) {
+                seconds += interval
+                add(Beat(seconds, 1.0f))
+            }
+        }
+        val referenceBeats =
+            List(16) { Beat(0.25 + it * 0.5, 1.0f) }
+                .filterIndexed { index, _ -> index != 8 }
+        val reference =
+            Analysis(
+                durationSeconds = 8.0,
+                bpm = 120.0,
+                tempoConfidence = 1.0,
+                beats = referenceBeats,
+                rmsDb = -12.0,
+                peakDb = -1.0,
+                spectralCentroidHz = 500.0,
+                keyEstimate = "unknown",
+                keyConfidence = 0.0,
+                energyBlocks = emptyList(),
+                onsetEnvelope = FloatArray(0),
+                onsetHopSeconds = 0.01,
+                warnings = emptyList(),
+            )
+
+        val result = PulseNormalizer.normalize(modelBeats, reference)
+
+        assertEquals(7.0 / 13.0, result.canonicalAgreement, 1e-12)
+        assertEquals(13.0 / 15.0, assertNotNull(result.quality.referenceCoverage), 1e-12)
+        assertFalse(result.quality.safeForAutomaticMix)
+        assertTrue(result.quality.issues.any { it.code == "UNCONFIRMED_CANONICAL_PULSE" })
+    }
+
+    @Test
     fun invalidRecordingDurationCannotCertifyAutomaticGrid() {
         val beats = List(16) { Beat(0.25 + it * 0.5, 1.0f) }
 
