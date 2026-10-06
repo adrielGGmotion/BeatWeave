@@ -70,6 +70,33 @@ class AutomaticPulseSelectionTest {
     }
 
     @Test
+    fun alternativePulseUsesItsOwnFullOnsetCoverage() {
+        val full = reference(fast, slow.take(47))
+        val measuredEndFrame =
+            ceil((slow[46].seconds + 0.055) / full.onsetHopSeconds).toInt()
+        val partialInitial =
+            full.copy(onsetEnvelope = full.onsetEnvelope.copyOf(measuredEndFrame + 1))
+        var passes = 0
+
+        val result =
+            AutomaticPulseSelector.select(
+                model(slow),
+                partialInitial,
+                {
+                    passes++
+                    assertEquals(80.0, it)
+                    reference(slow)
+                },
+            )
+
+        assertEquals(1, passes)
+        val candidate = result.diagnostics.candidates.single { it.bpm == 80.0 }
+        assertEquals(1.0, candidate.onsetAgreement)
+        assertEquals(80.0, result.diagnostics.selectedBpm)
+        assertTrue(result.pulse.quality.safeForAutomaticMix)
+    }
+
+    @Test
     fun independentlySupportedHigherPulseAlsoWorks() {
         val result =
             AutomaticPulseSelector.select(model(fast), reference(slow, fast), { reference(fast) })

@@ -109,7 +109,7 @@ object AutomaticPulseSelector {
         )
         val evaluated = ArrayList<Evaluation>()
         var extraPasses = 0
-        val onsetAgreement = onsetAgreement(model.beats, initialReference)
+        val initialOnsetAgreement = onsetAgreement(model.beats, initialReference)
         val proposed =
             unique.sortedByDescending { candidate ->
                 approximateAgreement(model.beats, candidate.bpm) * 0.8 +
@@ -137,7 +137,7 @@ object AutomaticPulseSelector {
                             candidate.support,
                             approximate,
                             0.0,
-                            onsetAgreement,
+                            initialOnsetAgreement,
                             0.0,
                             false,
                             false,
@@ -156,7 +156,7 @@ object AutomaticPulseSelector {
                             candidate.support,
                             approximate,
                             0.0,
-                            onsetAgreement,
+                            initialOnsetAgreement,
                             0.0,
                             false,
                             false,
@@ -208,6 +208,7 @@ object AutomaticPulseSelector {
                     )
                 continue
             }
+            val onsetAgreement = onsetAgreement(model.beats, reference)
             var phaseEvidence =
                 PulsePhaseAudit.assess(model.beats, reference.beats, cancellationCheck)
             if (phaseEvidence.relation == PulsePhaseRelation.REGIONAL_SUPPORT) {
