@@ -50,7 +50,10 @@ class CandidateAcousticRangeTest {
     fun earlierSilenceCannotPoisonTheFirstCompleteActivePhrase() {
         val a = song()
         val b = song((0..23).toSet())
-        val selection = LocalMixPlanner.autoTransition(a, b, 2).automaticSelection!!
+        // Twelve seconds is beyond this short fixture's default opening window.
+        assertFailsWith<AutoMixPlanningException> { LocalMixPlanner.autoTransition(a, b, 2) }
+        val selection = LocalMixPlanner.autoTransition(a, b, 2,
+            searchOptions = AutoMixSearchOptions(maximumIncomingStartFraction = 1.0)).automaticSelection!!
         assertEquals(6, selection.incomingStartBar)
         assertEquals(12.25, selection.incomingStartSeconds, 1e-9)
     }

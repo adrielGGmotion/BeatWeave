@@ -153,7 +153,18 @@ tempo, spectral centroid and loudness agree, it also rewards longer spans whose
 measured levels stay balanced through the candidate overlap. This can select a
 16-bar blend for compatible recordings while keeping the clock and bar checks.
 `autoTransition` ranks cues at its requested length (16 by default); it does not
-silently shorten the fade. If the shortlisted cues yield no accepted plan, the
+silently shorten the fade. Both automatic transition APIs restrict the incoming
+**start** to the first 30 seconds or first 10% of the decoded recording, whichever
+is shorter. The overlap may continue beyond that window. This is an eligibility
+rule before ranking, not a score preference; a trained model, ordered retry,
+pinned beat or alternative detector cannot move the entry past it. If no opening
+candidate passes the normal checks, the planner declines. The search report's
+`incomingStartLimitSeconds` records the absolute limit. Callers can explicitly
+configure both bounds with `AutoMixSearchOptions.maximumIncomingStartSeconds`
+and `maximumIncomingStartFraction`; ordinary automix uses the opening defaults.
+Manual bar selection and full-track `overlap` keep their existing behavior.
+
+If the shortlisted cues yield no accepted plan, the
 planner retries the earlier earliest-incoming, latest-outgoing scan within the
 remaining candidate-pair and clock-fit budgets. Fixed-length requests retain
 their exact length; automatic requests retry 8, 4, 16, 2 and 32 bars in that

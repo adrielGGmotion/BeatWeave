@@ -5,6 +5,11 @@ import kotlin.test.*
 import org.metrolist.beatweave.*
 
 class AutoMixPlannerTest {
+    // Legacy ranking/budget fixtures deliberately cover the full recording. Opening defaults
+    // have separate regressions; widening here isolates those original contracts.
+    private val fullTrackSearch = AutoMixSearchOptions(
+        maximumIncomingStartSeconds = Double.MAX_VALUE, maximumIncomingStartFraction = 1.0,
+    )
     private fun song(
         meters: List<Int>,
         period: Double = 0.4,
@@ -149,9 +154,14 @@ class AutoMixPlannerTest {
     fun automaticBarSearchChoosesARangeContainingOriginalCanonicalPins() {
         val first = song(List(8) { 4 })
         val second = song(List(8) { 4 }, 0.41)
+        assertFailsWith<AutoMixPlanningException> {
+            AutoMixPlanner.transition(first, second, bars = 4,
+                fitOptions = ClockFitOptions(pinnedIncomingBeats = setOf(25)))
+        }
         val result = AutoMixPlanner.transition(
             first, second, bars = 4,
             fitOptions = ClockFitOptions(pinnedIncomingBeats = setOf(25)),
+            searchOptions = fullTrackSearch,
         )
         val selected = assertNotNull(result.automaticSelection)
         assertEquals(4, selected.outgoingStartBar)
@@ -170,10 +180,10 @@ class AutoMixPlannerTest {
     }
 
     @Test
-    fun measuredEnergyRanksAnIncomingLiftAndOutgoingReleaseOverTheOldCueOrder() {
+    fun measuredEnergyRanksAnIncomingLiftInsideAnExplicitlyWidenedWindow() {
         val outgoing = withBarEnergy(song(List(20) { 4 }, period = 0.6), List(16) { -12.0 } + List(4) { -24.0 })
         val incoming = withBarEnergy(song(List(20) { 4 }, period = 0.6), List(12) { -24.0 } + List(8) { -8.0 })
-        val plan = LocalMixPlanner.autoTransition(outgoing, incoming, bars = 4)
+        val plan = LocalMixPlanner.autoTransition(outgoing, incoming, bars = 4, searchOptions = fullTrackSearch)
         val selected = assertNotNull(plan.automaticSelection)
         assertEquals(AutoMixSelectionPolicy.AUDIO_AWARE_RANKING, selected.policy)
         assertEquals(16, selected.outgoingStartBar)
@@ -187,7 +197,8 @@ class AutoMixPlannerTest {
     fun fullyAutomaticModeSelectsLengthAsWellAsTimingSafeCues() {
         val outgoing = withBarEnergy(song(List(20) { 4 }, period = 0.6), List(16) { -12.0 } + List(4) { -24.0 })
         val incoming = withBarEnergy(song(List(20) { 4 }, period = 0.6), List(12) { -24.0 } + List(8) { -8.0 })
-        val selected = assertNotNull(LocalMixPlanner.bestTransition(outgoing, incoming).automaticSelection)
+        val selected = assertNotNull(LocalMixPlanner.bestTransition(outgoing, incoming,
+            searchOptions = fullTrackSearch).automaticSelection)
         assertEquals(4, selected.barCount)
         assertEquals(16, selected.outgoingStartBar)
         assertEquals(8, selected.incomingStartBar)
@@ -288,7 +299,7 @@ class AutoMixPlannerTest {
         val incoming = withBarEnergy(song(List(20) { 4 }, period = 0.6), List(12) { -24.0 } + List(8) { -8.0 })
         val selected = assertNotNull(LocalMixPlanner.autoTransition(outgoing, incoming, bars = 4).automaticSelection)
         assertEquals(16, selected.outgoingStartBar)
-        assertEquals(8, selected.incomingStartBar)
+        assertEquals(0, selected.incomingStartBar)
     }
 
     @Test
@@ -354,7 +365,7 @@ class AutoMixPlannerTest {
             song(List(8) { 4 } + List(300) { 3 }), List(308) { -18.0 },
         )
         val incoming = withBarEnergy(song(List(148) { 4 }), List(148) { -18.0 })
-        val plan = AutoMixPlanner.transition(outgoing, incoming, bars = 4)
+        val plan = AutoMixPlanner.transition(outgoing, incoming, bars = 4, searchOptions = fullTrackSearch)
         val selected = assertNotNull(plan.automaticSelection)
         assertEquals(AutoMixSelectionPolicy.EARLY_INCOMING_LATE_OUTGOING, selected.policy)
         assertEquals(AutoMixSearchStrategy.ORDERED_TRANSITION_SCAN, selected.search.strategy)
@@ -374,7 +385,7 @@ class AutoMixPlannerTest {
         val limited = assertFailsWith<AutoMixPlanningException> {
             AutoMixPlanner.transition(
                 outgoing, incoming, bars = 4,
-                searchOptions = AutoMixSearchOptions(maximumCandidatePairs = 128 * 128),
+                searchOptions = fullTrackSearch.copy(maximumCandidatePairs = 128 * 128),
             )
         }
         assertEquals(AutoMixFailureCode.SEARCH_LIMIT_REACHED, limited.report.failure)
@@ -389,7 +400,7 @@ class AutoMixPlannerTest {
         )
         val incoming = withBarEnergy(song(List(200) { 4 }), List(200) { -18.0 })
         val selected = assertNotNull(
-            AutoMixPlanner.bestTransition(outgoing, incoming).automaticSelection,
+            AutoMixPlanner.bestTransition(outgoing, incoming, searchOptions = fullTrackSearch).automaticSelection,
         )
         assertEquals(AutoMixSelectionPolicy.AUTOMATIC_LENGTH_FALLBACK, selected.policy)
         assertEquals(AutoMixSearchStrategy.ORDERED_TRANSITION_SCAN, selected.search.strategy)
@@ -406,7 +417,7 @@ class AutoMixPlannerTest {
         val limited = assertFailsWith<AutoMixPlanningException> {
             AutoMixPlanner.bestTransition(
                 outgoing, incoming,
-                searchOptions = AutoMixSearchOptions(
+                searchOptions = fullTrackSearch.copy(
                     maximumCandidatePairs = selected.search.inspectedPairs - 1,
                 ),
             )
@@ -796,5 +807,82 @@ class AutoMixPlannerTest {
         assertFailsWith<IllegalArgumentException> {
             AutoMixPlanner.overlap(a, a, outputSampleRate = 0)
         }
+    }
+
+    @Test
+    fun aLateBiasedModelCannotMoveAutomaticEntriesOutsideTheOpening() {
+        val weights = DoubleArray(104).also { it[1] = 1e6 }
+        val model = TrainedCueModel(DoubleArray(13), DoubleArray(13) { 1.0 }, weights, "late-bias")
+        for (count in listOf(20, 200)) {
+            val track = withBarEnergy(song(List(count) { 4 }), List(count) { -18.0 })
+            val options = AutoMixSearchOptions(cueModel = model)
+            val unrestricted = AutoMixPlanner.transition(track, track, 4, searchOptions = options.copy(
+                maximumIncomingStartSeconds = Double.MAX_VALUE, maximumIncomingStartFraction = 1.0,
+            )).automaticSelection!!
+            assertTrue(unrestricted.incomingStartSeconds > track.audio.durationSeconds / 2)
+            val limit = minOf(30.0, track.audio.durationSeconds * .1)
+            val choices = listOf(
+                AutoMixPlanner.transition(track, track, 4, searchOptions = options),
+                AutoMixPlanner.bestTransition(track, track, searchOptions = options),
+            )
+            for (plan in choices) {
+                val selected = plan.automaticSelection!!
+                assertEquals(limit, selected.search.incomingStartLimitSeconds)
+                assertTrue(selected.incomingStartSeconds in 0.0..limit)
+                assertEquals(track.pulse.beats[selected.incomingStartBeat].seconds, selected.incomingStartSeconds)
+                assertTrue(plan.barMatches.all { it.originalIncomingSeconds == it.preparedIncomingSeconds })
+            }
+        }
+    }
+
+    @Test
+    fun orderedAndRankedFallbackDeclineWhenOnlyLateMetersMatch() {
+        val outgoing = song(List(20) { 4 })
+        val incoming = song(List(8) { 3 } + List(12) { 4 })
+        for (features in listOf(false, true)) {
+            val a = if (features) withBarEnergy(outgoing, List(20) { -18.0 }) else outgoing
+            val b = if (features) withBarEnergy(incoming, List(20) { -18.0 }) else incoming
+            val failure = assertFailsWith<AutoMixPlanningException> { AutoMixPlanner.transition(a, b, 2) }
+            assertEquals(AutoMixFailureCode.NO_COMPATIBLE_BAR_RANGE, failure.report.failure)
+            assertEquals(0, failure.report.rejectedClocks)
+            assertNotNull(failure.report.incomingStartLimitSeconds)
+            assertEquals(AutoMixSearchStrategy.ORDERED_TRANSITION_SCAN, failure.report.strategy)
+        }
+        // Full overlap intentionally remains independent of the incoming-entry policy.
+        assertNull(AutoMixPlanner.overlap(outgoing, incoming).automaticSelection!!.search.incomingStartLimitSeconds)
+    }
+
+    @Test
+    fun alternativeAnalysisMustAlsoSatisfyTheSameOpeningWindow() {
+        val a = song(List(20) { 4 })
+        val late = song(List(8) { 3 } + List(12) { 4 })
+        val early = song(List(12) { 4 } + List(8) { 3 })
+        val selected = AutoMixAnalysisEnsemble.bestTransition(listOf(a), listOf(late, early))
+        assertEquals(1, selected.incomingAnalysis)
+        assertEquals(AutoMixFailureCode.NO_COMPATIBLE_BAR_RANGE, selected.attempts[0].report.failure)
+        val cue = selected.plan.automaticSelection!!
+        assertTrue(cue.incomingStartSeconds <= early.audio.durationSeconds * .1)
+        assertFailsWith<AutoMixAnalysisException> {
+            AutoMixAnalysisEnsemble.bestTransition(listOf(a), listOf(late, late))
+        }
+    }
+
+    @Test
+    fun openingLimitIncludesItsBoundaryAndRejectsTheNextStart() {
+        val a = withBarEnergy(song(List(20) { 4 }), List(20) { -18.0 })
+        val boundary = a.bars().beats.at(a.bars().boundary(2))
+        val model = TrainedCueModel(DoubleArray(13), DoubleArray(13) { 1.0 },
+            DoubleArray(104).also { it[1] = 1e6 }, "late-bias")
+        val options = AutoMixSearchOptions(cueModel = model, maximumIncomingStartSeconds = boundary,
+            maximumIncomingStartFraction = 1.0)
+        assertEquals(boundary, AutoMixPlanner.transition(a, a, 4, searchOptions = options)
+            .automaticSelection!!.incomingStartSeconds)
+        assertTrue(AutoMixPlanner.transition(a, a, 4, searchOptions = options.copy(
+            maximumIncomingStartSeconds = boundary - 1e-6,
+        )).automaticSelection!!.incomingStartSeconds < boundary)
+        for (seconds in listOf(-1.0, Double.NaN, Double.POSITIVE_INFINITY))
+            assertFailsWith<IllegalArgumentException> { AutoMixSearchOptions(maximumIncomingStartSeconds = seconds) }
+        for (fraction in listOf(-.1, 1.1, Double.NaN))
+            assertFailsWith<IllegalArgumentException> { AutoMixSearchOptions(maximumIncomingStartFraction = fraction) }
     }
 }

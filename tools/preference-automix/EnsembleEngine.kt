@@ -46,7 +46,7 @@ fun main(args:Array<String>) {
                 }
             })
         val accepted=selected.plan;val p=accepted.mixPlan;val choice=accepted.automaticSelection!!
-        File(output,"plan.json").writeText("""{"status":"accepted","a":${p.startSeconds},"b":${p.secondSourceTime(p.startSeconds)},"duration":${p.fadeEndSeconds-p.startSeconds},"bars":${choice.barCount},"outgoing_analysis":${selected.outgoingAnalysis},"incoming_analysis":${selected.incomingAnalysis},"production_clock_gates":true}"""+"\n")
+        File(output,"plan.json").writeText("""{"status":"accepted","a":${p.startSeconds},"b":${p.secondSourceTime(p.startSeconds)},"duration":${p.fadeEndSeconds-p.startSeconds},"bars":${choice.barCount},"outgoing_analysis":${selected.outgoingAnalysis},"incoming_analysis":${selected.incomingAnalysis},"incoming_start_limit_seconds":${choice.search.incomingStartLimitSeconds},"incoming_duration_seconds":${songs[1][selected.incomingAnalysis].audio.durationSeconds},"production_clock_gates":true}"""+"\n")
         File(output,"accepted-map.csv").printWriter().use{w ->
             w.println("output_source_seconds,incoming_source_seconds")
             var t=(p.startSeconds-6).coerceAtLeast(0.0);val end=p.fadeEndSeconds+6

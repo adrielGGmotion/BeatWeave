@@ -1,5 +1,53 @@
 # Preference training and automatic listening tests
 
+## Opening-entry repair after round 6
+
+The latest feedback requires each incoming song to enter near its beginning.
+Earlier ranking only rewarded early starts, so acoustic similarity or a learned
+score could still select a middle section. Automatic transition candidates now
+must start within `min(30 seconds, 0.10 * incoming decoded duration)`, before
+shortlisting or model scoring. Ordered retries and the final candidate guard
+enforce the same limit. Both detector interpretations use the full recording's
+absolute source clock. Overlap length may extend beyond this entry window.
+
+If no opening candidate meets meter, pulse, acoustic and clock checks, the
+planner declines instead of jumping later or relaxing those checks. The
+`incomingStartLimitSeconds` search diagnostic and exported plan record the
+limit. Outgoing selection, explicit manual bar selection, full overlap mode and
+full-span volume curves keep their existing behavior. The public search options
+allow callers to explicitly configure both entry bounds; the frozen audition
+runner exposes no such per-song override and always uses the opening defaults.
+
+This is a deterministic policy correction, **not a new model-training round**.
+The detector, cue and fader weights are byte-identical to round 6. Previously
+approved middle entries are historical feedback and do not override this newer
+requirement. Future cue fits must use the newly filtered candidate pools;
+unavailable old references cannot supervise an eligible candidate. No positive
+label is silently moved to a different intro location.
+
+`opening_compare.py` compares round-6 experimental cue weights before and after
+the policy, rerendering both with the same faders, R2 renderer, no EQ and one
+common export gain per pair. All first automatic results and declines are kept.
+It requires complete decoded source PCM under each pair's `data/` directory,
+the original-source hash manifest, and a fresh opening release. Model weights,
+recordings and generated evidence stay outside Git.
+
+```sh
+python3 tools/preference-automix/verify_candidates.py
+python3 tools/preference-automix/build_training_engine.py ROUND6/frozen
+python3 tools/preference-automix/freeze_opening.py ROUND6/frozen OPENING
+OPENBLAS_NUM_THREADS=2 python3 tools/preference-automix/opening_compare.py OPENING ROUND6
+python3 tools/preference-automix/run_ensemble.py outgoing.opus incoming.opus \
+  --release OPENING/frozen --out NEW_EMPTY_DIRECTORY --experimental-cues
+```
+
+The fixed-length, automatic-length, fallback and ensemble regressions use an
+adversarial late-biased scorer, incompatible opening meters, quiet intros,
+short/long recordings and exact window boundaries. Older full-track ranking and
+large-search-budget fixtures explicitly widen the window to isolate their
+original contracts. Incoming pins still cannot bypass the default opening rule.
+Passing these tests establishes entry-policy enforcement, not musical quality.
+
 ## Round 6: candidate coverage and feasible-window cue training
 
 The previous scorer could not choose some approved windows because candidate

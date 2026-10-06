@@ -6,17 +6,22 @@ import kotlin.math.roundToLong
 import kotlin.math.sqrt
 import org.metrolist.beatweave.*
 
-/** Resource bounds, not permission to relax musical or clock acceptance. */
+/** Search budgets and incoming-entry policy; musical and clock acceptance remain independent. */
 data class AutoMixSearchOptions(
     val maximumCandidatePairs: Int = 250_000,
     val maximumClockFits: Int = 64,
     val minimumOverlapBars: Int = 2,
     /** Optional locally trained musical preference model. Defaults preserve existing ranking. */
     val cueModel: TrainedCueModel? = null,
+    /** Automatic transition entries must satisfy both limits; overlap/mashup mode is unaffected. */
+    val maximumIncomingStartSeconds: Double = 30.0,
+    val maximumIncomingStartFraction: Double = 0.10,
 ) {
     init {
         require(maximumCandidatePairs > 0 && maximumClockFits > 0)
         require(minimumOverlapBars >= 2)
+        require(maximumIncomingStartSeconds.isFinite() && maximumIncomingStartSeconds >= 0.0)
+        require(maximumIncomingStartFraction.isFinite() && maximumIncomingStartFraction in 0.0..1.0)
     }
 }
 
@@ -65,6 +70,8 @@ data class AutoMixSearchReport(
     val failure: AutoMixFailureCode? = null,
     val strategy: AutoMixSearchStrategy? = null,
     val tracks: List<AutoMixTrackDiagnostic> = emptyList(),
+    /** Absolute incoming source-time limit; null for full overlap mode. Applies to cue start only. */
+    val incomingStartLimitSeconds: Double? = null,
 )
 
 /** A caller can skip synchronization on this typed outcome; no fallback audio change is applied. */
@@ -172,6 +179,10 @@ object AutoMixPlanner {
         val search = Search(MixMode.TRANSITION, bars, searchOptions, isCancelled)
         val a = supported(first, AutoMixTrackRole.OUTGOING, search)
         val b = supported(second, AutoMixTrackRole.INCOMING, search)
+        search.incomingStartLimitSeconds = min(
+            searchOptions.maximumIncomingStartSeconds,
+            second.audio.durationSeconds * searchOptions.maximumIncomingStartFraction,
+        )
         search.requireSupportedTracks()
         val ranking = MusicalCueRanking(first.audio, second.audio)
         // Caller-assembled analyses without audio features retain the earlier deterministic policy
@@ -202,6 +213,7 @@ object AutoMixPlanner {
         val lengths = bars?.let(::listOf) ?: listOf(8, 4, 16, 2, 32)
         for (count in lengths) {
             for (incoming in 0 until b.grid.barCount) {
+                if (!search.allowsIncomingStart(b.grid, incoming)) continue
                 if (b.endByStart[incoming] - incoming < count) continue
                 if (!containsIncomingPins(b.grid, incoming, count, fitOptions)) continue
                 for (outgoing in a.grid.barCount - count downTo 0) {
@@ -269,6 +281,7 @@ object AutoMixPlanner {
                 (0..song.grid.barCount - bars)
                     .filter {
                         song.endByStart[it] - it >= bars &&
+                            (outgoing || search.allowsIncomingStart(song.grid, it)) &&
                             (outgoing || containsIncomingPins(song.grid, it, bars, fitOptions)) &&
                             transitionAcousticsSupported(
                                 if (outgoing) first else second, song.grid, it, bars,
@@ -916,6 +929,7 @@ object AutoMixPlanner {
         policy: AutoMixSelectionPolicy,
         musicalCueEvidence: MusicalCueEvidence? = null,
     ): LocalMixPlan? {
+        if (!search.allowsIncomingStart(b, incoming)) return null
         if (!containsIncomingPins(b, incoming, bars, fitOptions)) return null
         if (mode == MixMode.TRANSITION &&
             (!transitionAcousticsSupported(first, a, outgoing, bars) ||
@@ -993,8 +1007,15 @@ object AutoMixPlanner {
         var compatible = 0L
         var rejectedClocks = 0
         var strategy: AutoMixSearchStrategy? = null
+        var incomingStartLimitSeconds: Double? = null
         val tracks = ArrayList<AutoMixTrackDiagnostic>(2)
         private var fits = 0
+
+        fun allowsIncomingStart(grid: BarGrid, bar: Int): Boolean {
+            val limit = incomingStartLimitSeconds ?: return true
+            val start = grid.beats.at(grid.boundary(bar))
+            return start >= 0.0 && start <= limit
+        }
 
         fun checkCancellation() {
             if (isCancelled()) throw MixCancelledException()
@@ -1042,6 +1063,7 @@ object AutoMixPlanner {
                 failure,
                 strategy,
                 tracks.toList(),
+                incomingStartLimitSeconds,
             )
 
         fun fail(code: AutoMixFailureCode, detail: String): Nothing =
@@ -1051,7 +1073,8 @@ object AutoMixPlanner {
             fail(
                 if (rejectedClocks > 0) AutoMixFailureCode.CLOCK_REJECTED
                 else AutoMixFailureCode.NO_COMPATIBLE_BAR_RANGE,
-                "No compatible supported bar range passed all checks",
+                "No compatible supported bar range passed all checks" +
+                    (incomingStartLimitSeconds?.let { " with incoming entry in 0..$it seconds" } ?: ""),
             )
     }
 }
