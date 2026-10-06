@@ -595,6 +595,33 @@ class AutoMixPlannerTest {
     }
 
     @Test
+    fun musicalCueRankingRejectsEnergyOutsideTheRecording() {
+        val measured = withBarEnergy(song(List(20) { 4 }), List(20) { -18.0 })
+        val duration = measured.audio.durationSeconds
+        val beforeRecording =
+            List(4) { index ->
+                EnergyBlock(-8.0 + index * 2.0, -6.0 + index * 2.0, -12.0)
+            }
+        val afterRecording =
+            List(4) { index ->
+                EnergyBlock(duration + index * 2.0, duration + (index + 1) * 2.0, -12.0)
+            }
+
+        for (blocks in listOf(beforeRecording, afterRecording)) {
+            val invalid = measured.copy(audio = measured.audio.copy(energyBlocks = blocks))
+            assertFalse(MusicalCueRanking(invalid.audio, measured.audio).available)
+            assertFalse(MusicalCueRanking(measured.audio, invalid.audio).available)
+
+            val selected =
+                assertNotNull(
+                    AutoMixPlanner.transition(invalid, measured, bars = 4).automaticSelection
+                )
+            assertEquals(AutoMixSelectionPolicy.EARLY_INCOMING_LATE_OUTGOING, selected.policy)
+            assertNull(selected.musicalCueEvidence)
+        }
+    }
+
+    @Test
     fun musicalCueRankingCanCancelWhilePreparingLongFeatureTimelines() {
         val base = withBarEnergy(song(List(40) { 4 }), List(40) { -18.0 }).audio
         val longFeatures =

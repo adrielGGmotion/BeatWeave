@@ -259,6 +259,7 @@ internal class MusicalCueRanking(
                 if (
                     !block.startSeconds.isFinite() || !block.endSeconds.isFinite() ||
                         !block.rmsDb.isFinite() || block.endSeconds <= block.startSeconds ||
+                        block.startSeconds < 0.0 || block.endSeconds > duration ||
                         i > 0 && block.startSeconds < values[i - 1].endSeconds
                 ) return false
             }
