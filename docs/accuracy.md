@@ -34,6 +34,9 @@ moved onto unrelated beats. The ordered peak clocks are matched in linear time, 
 cancellation retained through postprocessing on long recordings.
 Non-finite onset clocks and envelope values cannot provide independent audio support for inserting
 or relocating canonical pulses, or inflate candidate onset agreement during pulse selection.
+Candidate onset agreement uses each evaluated tempo candidate's selected analysis, counts only
+neural events inside its measured envelope span, and remains unusable unless that span covers at
+least 55% of the candidate events.
 The independent fallback beat clock must also have a finite recording duration and finite, strictly
 ordered observations inside that duration before it can confirm or repair the model pulse.
 Automatic pulse diagnostics report that missing-reference rejection without deriving phase, onset,
