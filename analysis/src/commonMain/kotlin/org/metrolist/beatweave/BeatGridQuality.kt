@@ -308,7 +308,7 @@ object PulseNormalizer {
                     current.strength + 0.08 >= (left.strength + right.strength) / 2
             )
                 continue
-            val period = localPeriod(reference, current.seconds) ?: continue
+            val period = measuredLocalPeriod(reference, current.seconds) ?: continue
             val total = (right.seconds - left.seconds) / period
             if (round(total) !in 2.0..5.0 || abs(total - round(total)) > 0.24) continue
             val provisional = nearest(reference, current.seconds) ?: continue
@@ -461,7 +461,7 @@ object PulseNormalizer {
                     current.strength + 0.08 >= (left.strength + right.strength) / 2
             )
                 continue
-            val period = localPeriod(reference, current.seconds) ?: continue
+            val period = measuredLocalPeriod(reference, current.seconds) ?: continue
             if (abs((right.seconds - left.seconds) / period - 2) > 0.24) continue
             val midpoint = (left.seconds + right.seconds) / 2
             val candidate =
