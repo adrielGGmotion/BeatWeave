@@ -54,6 +54,8 @@ Canonical pulse agreement likewise scores only intervals bracketed by usable ref
 unmeasured edges and internal holes cannot raise its numerator or denominator.
 Duplicate-pulse removal also requires that measured cadence at the short interval; the normalizer
 does not delete an original model observation using an extrapolated edge or internal-gap period.
+Weak-pulse relocation applies the same rule in both correction passes, so an audio attack outside
+measured reference cadence cannot move an original model timestamp onto an extrapolated grid.
 Automatic pulse diagnostics report that missing-reference rejection without deriving phase, onset,
 or score evidence from the malformed candidate.
 Clock-quality assessment also streams ordered beat sections without materializing and sorting a
