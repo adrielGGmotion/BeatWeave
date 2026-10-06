@@ -498,7 +498,7 @@ class AutoMixPlannerTest {
     }
 
     @Test
-    fun fixedLengthSearchUsesAvailablePairBudgetBeforeDiscardingRankedCues() {
+    fun fixedLengthSearchDoesNotSpendPairBudgetOnIncompatibleMeterSequences() {
         val outgoing = withBarEnergy(
             song(List(8) { 4 } + List(300) { 3 }), List(308) { -18.0 },
         )
@@ -511,8 +511,9 @@ class AutoMixPlannerTest {
         assertTrue(selected.incomingStartBar in 0..144)
         assertEquals(List(4) { 4 }, selected.pulsesPerBar)
         assertNotNull(selected.musicalCueEvidence)
-        // All 305 outgoing and 145 incoming starts fit inside the 250,000-pair budget.
-        assertEquals(305 * 145, selected.search.inspectedPairs)
+        // Only the five 4/4 outgoing starts can match the 145 incoming starts. The other 300
+        // outgoing starts are 3/4 and must not consume the pair budget.
+        assertEquals(5 * 145, selected.search.inspectedPairs)
         assertEquals(5L * 145, selected.search.compatibleCandidates)
         assertTrue(selected.search.inspectedPairs <= AutoMixSearchOptions().maximumCandidatePairs)
         assertEquals(5, plan.barMatches.size)
@@ -521,19 +522,21 @@ class AutoMixPlannerTest {
                 kotlin.math.abs(it.originalBoundaryOutputResidualSeconds) < 1e-8
         })
 
-        val limited = assertFailsWith<AutoMixPlanningException> {
+        val limited =
             AutoMixPlanner.transition(
                 outgoing, incoming, bars = 4,
-                searchOptions = AutoMixSearchOptions(maximumCandidatePairs = 128 * 128),
+                searchOptions = AutoMixSearchOptions(maximumCandidatePairs = 128),
             )
-        }
-        assertEquals(AutoMixFailureCode.SEARCH_LIMIT_REACHED, limited.report.failure)
-        assertEquals(128 * 128, limited.report.inspectedPairs)
-        assertEquals(0, limited.report.rejectedClocks)
+        val limitedSelection = assertNotNull(limited.automaticSelection)
+        assertEquals(AutoMixSelectionPolicy.AUDIO_AWARE_RANKING, limitedSelection.policy)
+        assertEquals(AutoMixSearchStrategy.RANKED_TRANSITION_SCAN, limitedSelection.search.strategy)
+        assertEquals(128, limitedSelection.search.inspectedPairs)
+        assertEquals(128L, limitedSelection.search.compatibleCandidates)
+        assertNotNull(limitedSelection.musicalCueEvidence)
     }
 
     @Test
-    fun automaticLengthSearchRecoversCompatibleMeterOutsideEveryRankedShortlist() {
+    fun automaticLengthSearchRanksRareCompatibleMeterWithoutOrderedFallback() {
         val outgoing = withBarEnergy(
             song(List(8) { 4 } + List(300) { 3 }), List(308) { -18.0 },
         )
@@ -541,34 +544,23 @@ class AutoMixPlannerTest {
         val selected = assertNotNull(
             AutoMixPlanner.bestTransition(outgoing, incoming).automaticSelection,
         )
-        assertEquals(AutoMixSelectionPolicy.AUTOMATIC_LENGTH_FALLBACK, selected.policy)
-        assertEquals(AutoMixSearchStrategy.ORDERED_TRANSITION_SCAN, selected.search.strategy)
+        assertEquals(AutoMixSelectionPolicy.AUDIO_AWARE_RANKING, selected.policy)
+        assertEquals(AutoMixSearchStrategy.RANKED_TRANSITION_SCAN, selected.search.strategy)
         assertEquals(8, selected.barCount)
         assertEquals(0, selected.outgoingStartBar)
         assertEquals(0, selected.incomingStartBar)
         assertEquals(List(8) { 4 }, selected.pulsesPerBar)
         assertNull(selected.search.requestedBars)
-        assertNull(selected.musicalCueEvidence)
-        assertTrue(selected.search.inspectedPairs > 4 * 128 * 128)
+        assertNotNull(selected.musicalCueEvidence)
+        // Compatible demands are 7*199, 5*197 and 1*193 for 2, 4 and 8 bars. Longer
+        // all-4/4 sequences do not exist in the outgoing track.
+        assertEquals(7 * 199 + 5 * 197 + 193, selected.search.inspectedPairs)
+        assertEquals(selected.search.inspectedPairs.toLong(), selected.search.compatibleCandidates)
         assertTrue(selected.search.inspectedPairs <= AutoMixSearchOptions().maximumCandidatePairs)
-
-        // Five equal 128-start shortlists exactly consume this budget. The ordered retry must
-        // retain that exhaustion instead of resetting the shared pair count.
-        val fallbackBudget = 5 * 128 * 128
-        val limited = assertFailsWith<AutoMixPlanningException> {
-            AutoMixPlanner.bestTransition(
-                outgoing, incoming,
-                searchOptions = AutoMixSearchOptions(maximumCandidatePairs = fallbackBudget),
-            )
-        }
-        assertEquals(AutoMixFailureCode.SEARCH_LIMIT_REACHED, limited.report.failure)
-        assertEquals(AutoMixSearchStrategy.ORDERED_TRANSITION_SCAN, limited.report.strategy)
-        assertEquals(fallbackBudget, limited.report.inspectedPairs)
-        assertEquals(0, limited.report.rejectedClocks)
     }
 
     @Test
-    fun orderedRetryRetainsTheRankedClockFitBudgetAndQualityLimits() {
+    fun completedRankedSearchDoesNotRefitAnAlreadyRejectedClock() {
         val outgoing = withBarEnergy(song(List(4) { 4 }), List(4) { -18.0 })
         val incoming = withBarEnergy(song(List(4) { 4 }, 0.6), List(4) { -18.0 })
         val quality = WarpQualityLimits(maximumPlaybackSpeed = 1.01)
@@ -578,14 +570,15 @@ class AutoMixPlannerTest {
                 searchOptions = AutoMixSearchOptions(maximumClockFits = 1),
             )
         }
-        assertEquals(AutoMixSearchStrategy.ORDERED_TRANSITION_SCAN, limited.report.strategy)
-        assertEquals(AutoMixFailureCode.SEARCH_LIMIT_REACHED, limited.report.failure)
+        assertEquals(AutoMixSearchStrategy.RANKED_TRANSITION_SCAN, limited.report.strategy)
+        assertEquals(AutoMixFailureCode.CLOCK_REJECTED, limited.report.failure)
         assertEquals(1, limited.report.rejectedClocks)
         val rejected = assertFailsWith<AutoMixPlanningException> {
             AutoMixPlanner.transition(outgoing, incoming, bars = 4, qualityLimits = quality)
         }
         assertEquals(AutoMixFailureCode.CLOCK_REJECTED, rejected.report.failure)
-        assertEquals(2, rejected.report.rejectedClocks)
+        assertEquals(AutoMixSearchStrategy.RANKED_TRANSITION_SCAN, rejected.report.strategy)
+        assertEquals(1, rejected.report.rejectedClocks)
     }
 
     @Test

@@ -3,7 +3,6 @@ package org.metrolist.beatweave.learned
 import kotlin.math.abs
 import kotlin.math.min
 import kotlin.math.roundToLong
-import kotlin.math.sqrt
 import org.metrolist.beatweave.*
 
 /** Resource bounds, not permission to relax musical or clock acceptance. */
@@ -191,8 +190,8 @@ object AutoMixPlanner {
         search: Search,
     ): LocalMixPlan {
         search.strategy = AutoMixSearchStrategy.ORDERED_TRANSITION_SCAN
-        // A shortlist can omit the only shared meter sequence. The automatic retry uses the
-        // same conservative length preference as feature-free ranking, retaining both budgets.
+        // Fixed-length caller analyses without measured cue features retain the deterministic
+        // early-incoming/late-outgoing policy.
         val lengths = bars?.let(::listOf) ?: listOf(8, 4, 16, 2, 32)
         for (count in lengths) {
             for (incoming in 0 until b.grid.barCount) {
@@ -223,6 +222,12 @@ object AutoMixPlanner {
 
     private data class RankedStart(val bar: Int, val part: MusicalCueRanking.Part)
 
+    private data class RankedMeterGroup(
+        val bars: Int,
+        val outgoing: List<RankedStart>,
+        val incoming: List<RankedStart>,
+    )
+
     private data class RankedTransition(
         val outgoing: Int,
         val incoming: Int,
@@ -250,73 +255,96 @@ object AutoMixPlanner {
     ): LocalMixPlan {
         search.strategy = AutoMixSearchStrategy.RANKED_TRANSITION_SCAN
         val lengths = requestedBars?.let(::listOf) ?: TransitionPlanner.supportedBarCounts.toList()
-        // Size each shortlist from the configured Cartesian budget. A separate fixed cap used to
-        // leave most of the default budget idle for fixed-length searches, which could discard the
-        // only audio-ranked starts with a compatible meter sequence and force an ordered fallback.
-        val perTrackLimit =
-            sqrt(search.options.maximumCandidatePairs.toDouble() / lengths.size).toInt()
-                .coerceAtLeast(1)
-        val candidates = ArrayList<RankedTransition>()
-        var pairBudgetReached = false
-        lengthScan@ for (bars in lengths) {
+        val groups = ArrayList<RankedMeterGroup>()
+        for (bars in lengths) {
             search.checkCancellation()
-            /** Shortlists supported starts for this length, retaining incoming pins and stable ties. */
-            fun starts(song: SupportedBars, outgoing: Boolean): List<RankedStart> =
-                (0..song.grid.barCount - bars)
-                    .filter {
-                        song.endByStart[it] - it >= bars &&
-                            (outgoing || containsIncomingPins(song.grid, it, bars, fitOptions))
-                    }
-                    .map {
+            fun starts(song: SupportedBars, outgoing: Boolean): List<RankedStart> {
+                val result = ArrayList<RankedStart>()
+                for (bar in 0..song.grid.barCount - bars) {
+                    if (bar % 256 == 0) search.checkCancellation()
+                    if (
+                        song.endByStart[bar] - bar < bars ||
+                            !outgoing && !containsIncomingPins(song.grid, bar, bars, fitOptions)
+                    ) continue
+                    result +=
                         RankedStart(
-                            it,
-                            if (outgoing) ranking.outgoing(song.grid, it, bars)
-                            else ranking.incoming(song.grid, it, bars),
+                            bar,
+                            if (outgoing) ranking.outgoing(song.grid, bar, bars)
+                            else ranking.incoming(song.grid, bar, bars),
                         )
-                    }
-                    .sortedWith(
-                        compareByDescending<RankedStart> { it.part.score }
-                            .thenBy { if (outgoing) -it.bar else it.bar }
-                    )
-                    .take(perTrackLimit)
-            val outgoing = starts(a, true)
-            val incoming = starts(b, false)
-            for (entry in incoming) for (exit in outgoing) {
-                // With fewer pairs than lengths, the minimum one-start shortlist can exceed
-                // the total pair budget. Preserve collected candidates for the separate fit
-                // stage rather than declining before any of their clocks have been checked.
-                if (search.pairs >= search.options.maximumCandidatePairs) {
-                    search.checkCancellation()
-                    pairBudgetReached = true
-                    break@lengthScan
                 }
-                search.inspect()
-                if (!sameBars(a.grid, b.grid, exit.bar, entry.bar, bars)) continue
-                if (a.grid.boundary(exit.bar + bars) - a.grid.boundary(exit.bar) > 512) continue
-                search.compatible++
-                val measured = ranking.evidence(exit.part, entry.part, bars)
-                val evidence =
-                    if (ranking.available) measured
-                    else {
-                        // Only automatic length selection reaches this fallback; fixed lengths
-                        // without audio features go straight to orderedTransition.
-                        val lengthOrder =
-                            when (bars) {
-                                8 -> 5
-                                4 -> 4
-                                16 -> 3
-                                2 -> 2
-                                else -> 1
-                            }
-                        measured.copy(score = 10.0 * lengthOrder + exit.part.score + entry.part.score)
-                    }
-                candidates +=
-                    RankedTransition(
-                        exit.bar,
-                        entry.bar,
-                        bars,
-                        evidence,
-                    )
+                return result.sortedWith(
+                    compareByDescending<RankedStart> { it.part.score }
+                        .thenBy { if (outgoing) -it.bar else it.bar }
+                )
+            }
+            fun byMeter(song: SupportedBars, starts: List<RankedStart>) =
+                starts.groupBy { start ->
+                    List(bars) { offset -> song.grid.beatsInBar(start.bar + offset) }
+                }
+            val outgoing = byMeter(a, starts(a, true))
+            val incoming = byMeter(b, starts(b, false))
+            for ((meter, entries) in incoming) {
+                val exits = outgoing[meter] ?: continue
+                groups += RankedMeterGroup(bars, exits, entries)
+            }
+        }
+
+        // Share the bounded scan fairly across every compatible meter sequence. Within a group,
+        // diagonals consider the best independent ranks from both tracks before moving deeper;
+        // unlike a rectangular global shortlist, this cannot spend the budget on meter-mismatched
+        // pairs or erase a rare but supported sequence.
+        val demands = groups.map { it.outgoing.size.toLong() * it.incoming.size }
+        val pairBudgets = fairPairBudgets(demands, search.options.maximumCandidatePairs)
+        val pairBudgetReached = demands.sumCapped(search.options.maximumCandidatePairs) >
+            search.options.maximumCandidatePairs
+        val candidates = ArrayList<RankedTransition>()
+        for ((groupIndex, group) in groups.withIndex()) {
+            var emitted = 0
+            var diagonal = 0
+            val budget = pairBudgets[groupIndex]
+            while (emitted < budget) {
+                val firstExit = (diagonal - group.incoming.lastIndex).coerceAtLeast(0)
+                val lastExit = diagonal.coerceAtMost(group.outgoing.lastIndex)
+                for (exitIndex in firstExit..lastExit) {
+                    if (emitted >= budget) break
+                    val entryIndex = diagonal - exitIndex
+                    val exit = group.outgoing[exitIndex]
+                    val entry = group.incoming[entryIndex]
+                    search.inspect()
+                    emitted++
+                    if (
+                        !sameBars(a.grid, b.grid, exit.bar, entry.bar, group.bars) ||
+                            a.grid.boundary(exit.bar + group.bars) - a.grid.boundary(exit.bar) > 512
+                    ) continue
+                    search.compatible++
+                    val measured = ranking.evidence(exit.part, entry.part, group.bars)
+                    val evidence =
+                        if (ranking.available) measured
+                        else {
+                            // Only automatic length selection reaches this fallback; fixed lengths
+                            // without audio features go straight to orderedTransition.
+                            val lengthOrder =
+                                when (group.bars) {
+                                    8 -> 5
+                                    4 -> 4
+                                    16 -> 3
+                                    2 -> 2
+                                    else -> 1
+                                }
+                            measured.copy(
+                                score = 10.0 * lengthOrder + exit.part.score + entry.part.score
+                            )
+                        }
+                    candidates +=
+                        RankedTransition(
+                            exit.bar,
+                            entry.bar,
+                            group.bars,
+                            evidence,
+                        )
+                }
+                diagonal++
             }
         }
         candidates.sortWith(
@@ -343,11 +371,43 @@ object AutoMixPlanner {
                 AutoMixFailureCode.SEARCH_LIMIT_REACHED,
                 "Candidate-pair budget exhausted; no collected candidate passed all checks",
             )
-        // Independent top-N lists can omit a compatible meter sequence. Retry supported starts
-        // using the remaining pair and clock-fit budgets, including automatic length selection.
-        return orderedTransition(
-            first, second, a, b, requestedBars, outputSampleRate, fitOptions, qualityLimits, search
-        )
+        // Every supported compatible meter group was enumerated in full. Retrying in ordered
+        // order would only refit already rejected clocks and could misreport a fit-budget limit.
+        search.decline()
+    }
+
+    /** Max-min fair integer budgets whose sum reaches the cap whenever total demand does. */
+    private fun fairPairBudgets(demands: List<Long>, maximum: Int): IntArray {
+        if (demands.isEmpty()) return IntArray(0)
+        val total = demands.sumCapped(maximum)
+        if (total <= maximum) return IntArray(demands.size) { demands[it].toInt() }
+        var low = 0
+        var high = maximum
+        while (low < high) {
+            val middle = low + (high - low + 1) / 2
+            val used = demands.sumOf { min(it, middle.toLong()) }
+            if (used <= maximum) low = middle else high = middle - 1
+        }
+        val result = IntArray(demands.size) { min(demands[it], low.toLong()).toInt() }
+        var remaining = maximum - result.sum()
+        for (index in demands.indices) {
+            if (remaining == 0) break
+            if (result[index].toLong() < demands[index]) {
+                result[index]++
+                remaining--
+            }
+        }
+        check(remaining == 0)
+        return result
+    }
+
+    private fun List<Long>.sumCapped(limit: Int): Long {
+        var total = 0L
+        for (value in this) {
+            total += value
+            if (total > limit) return limit.toLong() + 1
+        }
+        return total
     }
 
     /**

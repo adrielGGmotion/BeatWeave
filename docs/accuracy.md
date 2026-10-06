@@ -21,6 +21,9 @@ boundary frames are weighted by their exact overlap with the requested window.
 When a short candidate's endpoint-analysis windows overlap, their dynamics contribution is
 weighted by the non-overlapping fraction so one change is not counted as independent evidence at
 both ends of the fade.
+Ranked cue search groups candidates by their exact meter sequence and shares its bounded pair
+budget across compatible groups, so incompatible meters cannot consume the scan or erase measured
+cue evidence for a rarer supported sequence.
 Positive downbeat peaks are attached to the canonical beat clock only within the model's
 three-frame (60 ms) observation tolerance; more distant peaks remain unsupported instead of being
 moved onto unrelated beats. The ordered peak clocks are matched in linear time, with cooperative
