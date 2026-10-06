@@ -143,6 +143,32 @@ class AutomaticPulseSelectionTest {
     }
 
     @Test
+    fun selectorReportsInvalidFallbackClockWithoutPhaseEvidence() {
+        val duplicateTime = slow.toMutableList().also { it[40] = it[39] }
+        val result =
+            AutomaticPulseSelector.select(
+                model(slow),
+                reference(slow).copy(beats = duplicateTime),
+                { error("An invalid initial reference must not trigger another analysis") },
+            )
+
+        val candidate = result.diagnostics.candidates.single { it.bpm == 80.0 }
+        assertFalse(candidate.evaluated)
+        assertEquals(0.0, candidate.intervalAgreement)
+        assertEquals(0.0, candidate.phaseAgreement)
+        assertEquals(0.0, candidate.onsetAgreement)
+        assertEquals(0.0, candidate.score)
+        assertNull(candidate.phaseEvidence)
+        assertTrue(
+            candidate.rejectionReasons.any {
+                it.contains("Finite ordered model beats and an independent local pulse reference")
+            }
+        )
+        assertFalse(result.pulse.quality.safeForAutomaticMix)
+        assertTrue(result.regions.accepted.isEmpty())
+    }
+
+    @Test
     fun integerRelatedAlternativesRemainVisibleWithoutChangingTheSelectedClock() {
         val spectral =
             listOf(
