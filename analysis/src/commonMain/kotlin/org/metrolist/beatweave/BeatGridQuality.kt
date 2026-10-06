@@ -90,6 +90,26 @@ object BeatGridQuality {
             return BeatGridQualityReport(beats.size, 0.0, issues)
         }
         val intervals = beats.zipWithNext { a, b -> b.seconds - a.seconds }
+        if (referenceBeats != null) {
+            val referenceStart = referenceBeats.first().seconds
+            val referenceEnd = referenceBeats.last().seconds
+            val coveredIntervals =
+                intervals.indices.count { index ->
+                    val midpoint = beats[index].seconds + intervals[index] / 2
+                    midpoint >= referenceStart && midpoint <= referenceEnd
+                }
+            val coverage =
+                if (intervals.isEmpty()) 0.0 else coveredIntervals.toDouble() / intervals.size
+            if (coverage < 0.80) {
+                error(
+                    "INSUFFICIENT_REFERENCE_COVERAGE",
+                    beats.firstOrNull()?.seconds ?: 0.0,
+                    beats.lastOrNull()?.seconds ?: 0.0,
+                    "Independent reference brackets only ${(coverage * 100).roundToInt()}% of candidate intervals",
+                )
+                return BeatGridQualityReport(beats.size, 0.0, issues)
+            }
+        }
         val median = intervals.sorted().let { if (it.isEmpty()) 0.0 else it[it.size / 2] }
         for (i in intervals.indices) {
             val a = beats[i].seconds
@@ -102,7 +122,15 @@ object BeatGridQuality {
                     b,
                     "Adjacent pulses are only ${interval}s apart",
                 )
-            val local = PulseNormalizer.localPeriod(referenceBeats ?: beats, (a + b) / 2)
+            val midpoint = (a + b) / 2
+            val local =
+                if (
+                    referenceBeats != null &&
+                        (midpoint < referenceBeats.first().seconds ||
+                            midpoint > referenceBeats.last().seconds)
+                )
+                    null
+                else PulseNormalizer.localPeriod(referenceBeats ?: beats, midpoint)
             if (local != null && (interval / local < 0.62 || interval / local > 1.48))
                 error(
                     "PULSE_LEVEL_DISCONTINUITY",
