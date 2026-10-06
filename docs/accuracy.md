@@ -41,7 +41,10 @@ recording duration cannot contribute matches or measured coverage.
 The independent fallback beat clock must also have a finite recording duration and finite, strictly
 ordered observations inside that duration before it can confirm or repair the model pulse.
 The public beat-grid quality audit likewise rejects a supplied recording duration that is non-finite
-or non-positive instead of certifying timestamps against malformed source metadata.
+or non-positive instead of certifying timestamps against malformed source metadata. When callers
+supply an independent reference clock, its timestamps must be finite, non-negative, strictly
+ordered, and inside that duration, and its strengths must be finite; malformed references fail the
+audit instead of being filtered out of cadence comparisons.
 Automatic pulse diagnostics report that missing-reference rejection without deriving phase, onset,
 or score evidence from the malformed candidate.
 Clock-quality assessment also streams ordered beat sections without materializing and sorting a
