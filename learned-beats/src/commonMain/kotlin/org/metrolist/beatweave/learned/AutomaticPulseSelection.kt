@@ -405,31 +405,47 @@ object AutomaticPulseSelector {
     private fun onsetAgreement(beats: List<Beat>, reference: Analysis): Double {
         val step = reference.onsetHopSeconds
         val offset = reference.onsetTimeOffsetSeconds
+        val duration = reference.durationSeconds
         if (
             beats.isEmpty() ||
                 reference.onsetEnvelope.isEmpty() ||
                 step <= 0 ||
                 !step.isFinite() ||
-                !offset.isFinite()
+                !offset.isFinite() ||
+                !duration.isFinite() ||
+                duration <= 0
         )
             return 0.0
         val tolerance = 0.055
-        val measuredEnd = offset + reference.onsetEnvelope.lastIndex * step
-        if (!measuredEnd.isFinite()) return 0.0
+        val envelopeEnd = offset + reference.onsetEnvelope.lastIndex * step
+        if (!envelopeEnd.isFinite()) return 0.0
+        val measuredStart = max(0.0, offset)
+        val measuredEnd = min(duration, envelopeEnd)
+        if (measuredStart > measuredEnd) return 0.0
+        val firstFrame = max(0, ceil((measuredStart - offset) / step).toInt())
+        val lastFrame =
+            min(
+                reference.onsetEnvelope.lastIndex,
+                floor((measuredEnd - offset) / step).toInt(),
+            )
+        if (firstFrame > lastFrame) return 0.0
+        val firstMeasuredTime = offset + firstFrame * step
+        val lastMeasuredTime = offset + lastFrame * step
+        if (!firstMeasuredTime.isFinite() || !lastMeasuredTime.isFinite()) return 0.0
         var covered = 0
         var count = 0
         for (beat in beats) {
             if (!beat.seconds.isFinite()) return 0.0
             if (
-                beat.seconds + tolerance < offset ||
-                    beat.seconds - tolerance > measuredEnd
+                beat.seconds + tolerance < firstMeasuredTime ||
+                    beat.seconds - tolerance > lastMeasuredTime
             )
                 continue
             covered++
             val frame = (beat.seconds - offset) / step
             if (!frame.isFinite()) return 0.0
-            val lo = max(0, ceil(frame - tolerance / step).toInt())
-            val hi = min(reference.onsetEnvelope.lastIndex, floor(frame + tolerance / step).toInt())
+            val lo = max(firstFrame, ceil(frame - tolerance / step).toInt())
+            val hi = min(lastFrame, floor(frame + tolerance / step).toInt())
             if (
                 lo <= hi &&
                     (lo..hi).any {
