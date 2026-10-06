@@ -140,19 +140,27 @@ object PulseNormalizer {
         fun reject(code: String, a: Double, b: Double, message: String) {
             additional += BeatGridIssue(code, BeatIssueSeverity.ERROR, a, b, message)
         }
-        val valid =
-            rawBeats.all {
+        val duration = fallback.durationSeconds
+        val validDuration = duration.isFinite() && duration > 0.0
+        fun validClock(beats: List<Beat>): Boolean =
+            validDuration &&
+                beats.all {
                 it.seconds.isFinite() &&
                     it.seconds >= 0 &&
-                    it.seconds < fallback.durationSeconds &&
+                    it.seconds < duration &&
                     it.strength.isFinite()
-            } && rawBeats.zipWithNext().all { (a, b) -> b.seconds > a.seconds }
-        if (!valid || rawBeats.size < 8 || fallback.beats.size < 8) {
+                } && beats.zipWithNext().all { (a, b) -> b.seconds > a.seconds }
+        if (
+            !validClock(rawBeats) ||
+                !validClock(fallback.beats) ||
+                rawBeats.size < 8 ||
+                fallback.beats.size < 8
+        ) {
             reject(
                 "MISSING_REFERENCE",
                 0.0,
-                fallback.durationSeconds,
-                "Finite ordered model beats and an independent local pulse reference are required",
+                if (validDuration) duration else 0.0,
+                "Finite ordered model beats and an independent local pulse reference inside a finite recording are required",
             )
             return result(rawBeats, rawBeats, downbeatSeconds, repairs, fallback, additional, 0.0)
         }
