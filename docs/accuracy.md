@@ -34,6 +34,8 @@ moved onto unrelated beats. The ordered peak clocks are matched in linear time, 
 cancellation retained through postprocessing on long recordings.
 Non-finite onset clocks and envelope values cannot provide independent audio support for inserting
 or relocating canonical pulses.
+The independent fallback beat clock must also have a finite recording duration and finite, strictly
+ordered observations inside that duration before it can confirm or repair the model pulse.
 Clock-quality assessment also streams ordered beat sections without materializing and sorting a
 second knot list, and automatic planning polls cancellation throughout that scan.
 The 0.10.0 measurements below predate that change;
