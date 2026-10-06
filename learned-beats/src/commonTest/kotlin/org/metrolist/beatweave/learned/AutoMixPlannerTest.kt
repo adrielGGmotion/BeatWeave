@@ -618,6 +618,16 @@ class AutoMixPlannerTest {
                 )
             assertEquals(AutoMixSelectionPolicy.EARLY_INCOMING_LATE_OUTGOING, selected.policy)
             assertNull(selected.musicalCueEvidence)
+
+            val incomingInvalid =
+                assertNotNull(
+                    AutoMixPlanner.transition(measured, invalid, bars = 4).automaticSelection
+                )
+            assertEquals(
+                AutoMixSelectionPolicy.EARLY_INCOMING_LATE_OUTGOING,
+                incomingInvalid.policy,
+            )
+            assertNull(incomingInvalid.musicalCueEvidence)
         }
     }
 
