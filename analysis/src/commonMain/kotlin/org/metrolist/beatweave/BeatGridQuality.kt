@@ -366,7 +366,12 @@ object PulseNormalizer {
             }
             for (j in 1 until count) {
                 val expected = left.seconds + (right.seconds - left.seconds) * j / count
-                val tolerance = min(0.065, period * 0.18)
+                val candidatePeriod = measuredLocalPeriod(reference, expected)
+                if (candidatePeriod == null) {
+                    inserts += Insert(left, right, expected, null, null)
+                    continue
+                }
+                val tolerance = min(0.065, candidatePeriod * 0.18)
                 val audio = audioCandidate(fallback, expected, tolerance)
                 var model: Beat? = null
                 if (activationScores != null) {
