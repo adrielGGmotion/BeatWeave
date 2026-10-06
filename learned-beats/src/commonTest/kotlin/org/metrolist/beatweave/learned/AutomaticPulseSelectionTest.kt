@@ -79,6 +79,40 @@ class AutomaticPulseSelectionTest {
     }
 
     @Test
+    fun invalidOnsetClockCannotFabricateAudioSupportedPulseRepairs() {
+        val missing = slow.toMutableList().also { it.removeAt(40) }
+        val measured = reference(slow)
+        val unclocked = measured.onsetEnvelope.copyOf().also { it[0] = 1.0f }
+        val nonFiniteEnvelope =
+            measured.onsetEnvelope.copyOf().also {
+                it[(slow[40].seconds / measured.onsetHopSeconds).roundToInt()] =
+                    Float.POSITIVE_INFINITY
+            }
+        val invalidEvidence =
+            listOf(
+                measured.copy(onsetEnvelope = unclocked, onsetHopSeconds = Double.NaN),
+                measured.copy(
+                    onsetEnvelope = unclocked,
+                    onsetHopSeconds = Double.POSITIVE_INFINITY,
+                ),
+                measured.copy(
+                    onsetEnvelope = unclocked,
+                    onsetTimeOffsetSeconds = Double.NaN,
+                ),
+                measured.copy(onsetEnvelope = nonFiniteEnvelope),
+            )
+
+        for (invalid in invalidEvidence) {
+            val pulse = PulseNormalizer.normalize(missing, invalid)
+            assertFalse(
+                pulse.repairs.any { it.kind == PulseRepairKind.AUDIO_SUPPORTED_INSERTION }
+            )
+            assertFalse(pulse.quality.safeForAutomaticMix)
+            assertTrue(pulse.quality.issues.any { it.code == "UNSUPPORTED_INSERTION" })
+        }
+    }
+
+    @Test
     fun integerRelatedAlternativesRemainVisibleWithoutChangingTheSelectedClock() {
         val spectral =
             listOf(
