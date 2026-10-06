@@ -457,6 +457,21 @@ class AutoMixPlannerTest {
             startChange(padding + inRecording, -padding.size * hop),
             1e-12,
         )
+
+        val fractionalFrameAudio =
+            measured.audio.copy(
+                onsetEnvelope = floatArrayOf(0.0f, 0.0f, 1.0f, 1.0f, 1.0f, 1.0f, 10.0f),
+                onsetHopSeconds = 2.0,
+                onsetTimeOffsetSeconds = 1.0,
+            )
+        val fractionalStartChange =
+            MusicalCueRanking(fractionalFrameAudio, fractionalFrameAudio)
+                .incoming(grid, start = 3, bars = 2)
+                .startChange
+        // The final value covers [13, 14] inside this 14-second recording, not its full
+        // [13, 15] frame. The in-recording mean is therefore 18 / 13, making the 0 -> 1
+        // activity lift contribute 0.2 * 13 / 36.
+        assertEquals(13.0 / 180.0, fractionalStartChange, 1e-12)
     }
 
     @Test
