@@ -552,6 +552,19 @@ class AutoMixPlannerTest {
         assertTrue(selected.search.inspectedPairs > 4 * 128 * 128)
         assertTrue(selected.search.inspectedPairs <= AutoMixSearchOptions().maximumCandidatePairs)
 
+        // Five equal 128-start shortlists exactly consume this budget. The ordered retry must
+        // retain that exhaustion instead of resetting the shared pair count.
+        val fallbackBudget = 5 * 128 * 128
+        val limited = assertFailsWith<AutoMixPlanningException> {
+            AutoMixPlanner.bestTransition(
+                outgoing, incoming,
+                searchOptions = AutoMixSearchOptions(maximumCandidatePairs = fallbackBudget),
+            )
+        }
+        assertEquals(AutoMixFailureCode.SEARCH_LIMIT_REACHED, limited.report.failure)
+        assertEquals(AutoMixSearchStrategy.ORDERED_TRANSITION_SCAN, limited.report.strategy)
+        assertEquals(fallbackBudget, limited.report.inspectedPairs)
+        assertEquals(0, limited.report.rejectedClocks)
     }
 
     @Test
