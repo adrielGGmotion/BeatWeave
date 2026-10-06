@@ -73,18 +73,19 @@ object BeatGridQuality {
         }
         if (
             referenceBeats != null &&
-                (referenceBeats.any {
-                    !it.seconds.isFinite() ||
-                        it.seconds < 0 ||
-                        !it.strength.isFinite() ||
-                        (durationSeconds != null && it.seconds >= durationSeconds)
-                } || referenceBeats.zipWithNext().any { (a, b) -> b.seconds <= a.seconds })
+                (referenceBeats.size < 3 ||
+                    referenceBeats.any {
+                        !it.seconds.isFinite() ||
+                            it.seconds < 0 ||
+                            !it.strength.isFinite() ||
+                            (durationSeconds != null && it.seconds >= durationSeconds)
+                    } || referenceBeats.zipWithNext().any { (a, b) -> b.seconds <= a.seconds })
         ) {
             error(
                 "INVALID_REFERENCE_CLOCK",
                 0.0,
                 0.0,
-                "Reference beat timestamps must be finite, strictly increasing, and inside the audio",
+                "At least three reference beats with finite strengths and finite, strictly increasing timestamps inside the audio are required",
             )
             return BeatGridQualityReport(beats.size, 0.0, issues)
         }
