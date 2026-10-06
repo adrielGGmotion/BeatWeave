@@ -272,7 +272,7 @@ object PulseNormalizer {
         while (i < cleaned.size - 1) {
             val a = cleaned[i]
             val b = cleaned[i + 1]
-            val period = localPeriod(reference, (a.seconds + b.seconds) / 2)
+            val period = measuredLocalPeriod(reference, (a.seconds + b.seconds) / 2)
             if (period != null && b.seconds - a.seconds < period * 0.56) {
                 fun cost(remove: Int): Double {
                     val left = cleaned.getOrNull(remove - 1)
