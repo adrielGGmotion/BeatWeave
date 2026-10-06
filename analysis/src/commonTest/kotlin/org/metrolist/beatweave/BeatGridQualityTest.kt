@@ -9,6 +9,41 @@ import kotlin.test.assertTrue
 
 class BeatGridQualityTest {
     @Test
+    fun unmeasuredReferenceEdgeCannotInsertModelPulse() {
+        val modelBeats =
+            buildList {
+                add(Beat(0.0, 1.0f))
+                repeat(14) { index -> add(Beat(1.0 + index * 0.5, 1.0f)) }
+            }
+        val onsetEnvelope = FloatArray(850).also { it[50] = 1.0f }
+        val reference =
+            Analysis(
+                durationSeconds = 8.5,
+                bpm = 120.0,
+                tempoConfidence = 1.0,
+                beats = List(15) { Beat(0.75 + it * 0.5, 1.0f) },
+                rmsDb = -12.0,
+                peakDb = -1.0,
+                spectralCentroidHz = 500.0,
+                keyEstimate = "unknown",
+                keyConfidence = 0.0,
+                energyBlocks = emptyList(),
+                onsetEnvelope = onsetEnvelope,
+                onsetHopSeconds = 0.01,
+                warnings = emptyList(),
+            )
+
+        val result = PulseNormalizer.normalize(modelBeats, reference)
+
+        assertEquals(1.0, result.canonicalAgreement, 1e-12)
+        assertEquals(13.0 / 14.0, assertNotNull(result.quality.referenceCoverage), 1e-12)
+        assertEquals(modelBeats, result.beats)
+        assertTrue(result.repairs.isEmpty())
+        assertFalse(result.quality.safeForAutomaticMix)
+        assertTrue(result.quality.issues.any { it.code == "ABRUPT_PULSE_CHANGE" })
+    }
+
+    @Test
     fun unmeasuredReferenceEdgeCannotRelocateModelPulse() {
         val modelBeats =
             buildList {
