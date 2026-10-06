@@ -3,6 +3,7 @@ package org.metrolist.beatweave
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -83,7 +84,7 @@ class BeatGridQualityTest {
                 durationSeconds = 8.0,
             )
         assertTrue(isolatedGap.safeForAutomaticMix)
-        assertEquals(13.0 / 15.0, isolatedGap.referenceCoverage, 1e-12)
+        assertEquals(13.0 / 15.0, assertNotNull(isolatedGap.referenceCoverage), 1e-12)
 
         assertNull(
             BeatGridQuality.audit(beats, durationSeconds = 8.0).referenceCoverage,
@@ -94,7 +95,7 @@ class BeatGridQualityTest {
             BeatGridQuality.audit(beats, referenceBeats = reference, durationSeconds = 8.0)
 
         assertFalse(report.safeForAutomaticMix)
-        assertEquals(4.0 / 15.0, report.referenceCoverage, 1e-12)
+        assertEquals(4.0 / 15.0, assertNotNull(report.referenceCoverage), 1e-12)
         assertTrue(report.issues.any { it.code == "INSUFFICIENT_REFERENCE_COVERAGE" })
     }
 }
