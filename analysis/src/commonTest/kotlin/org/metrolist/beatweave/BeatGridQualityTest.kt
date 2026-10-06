@@ -16,4 +16,24 @@ class BeatGridQualityTest {
             assertTrue(report.issues.any { it.code == "INVALID_DURATION" })
         }
     }
+
+    @Test
+    fun malformedReferenceClockCannotCertifyAutomaticGrid() {
+        val beats = List(16) { Beat(0.25 + it * 0.5, 1.0f) }
+        val malformedReferences =
+            listOf(
+                beats.toMutableList().apply { this[4] = Beat(this[4].seconds, Float.NaN) },
+                beats.toMutableList().apply { this[8] = Beat(this[7].seconds, 1.0f) },
+                beats.toMutableList().apply { this[0] = Beat(-0.25, 1.0f) },
+                beats.toMutableList().apply { this[lastIndex] = Beat(8.0, 1.0f) },
+            )
+
+        for (reference in malformedReferences) {
+            val report =
+                BeatGridQuality.audit(beats, referenceBeats = reference, durationSeconds = 8.0)
+
+            assertFalse(report.safeForAutomaticMix)
+            assertTrue(report.issues.any { it.code == "INVALID_REFERENCE_CLOCK" })
+        }
+    }
 }
