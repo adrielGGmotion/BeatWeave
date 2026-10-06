@@ -169,6 +169,45 @@ class AutomaticPulseSelectionTest {
     }
 
     @Test
+    fun invalidOnsetEvidenceCannotQualifyAutomaticPulseCandidate() {
+        val measured = reference(slow)
+        val frameZero = FloatArray(measured.onsetEnvelope.size).also { it[0] = 1.0f }
+        val nonFinitePeaks =
+            FloatArray(measured.onsetEnvelope.size).also { onset ->
+                slow.forEach {
+                    onset[(it.seconds / measured.onsetHopSeconds).roundToInt()] =
+                        Float.POSITIVE_INFINITY
+                }
+            }
+        val invalidEvidence =
+            listOf(
+                measured.copy(
+                    onsetEnvelope = frameZero,
+                    onsetTimeOffsetSeconds = Double.NaN,
+                ),
+                measured.copy(onsetEnvelope = nonFinitePeaks),
+            )
+
+        for (invalid in invalidEvidence) {
+            val result =
+                AutomaticPulseSelector.select(
+                    model(slow),
+                    invalid,
+                    { error("The initial pulse level is already the supported candidate") },
+                )
+            val candidate = result.diagnostics.candidates.single { it.bpm == 80.0 }
+            assertEquals(0.0, candidate.onsetAgreement)
+            assertNull(result.diagnostics.selectedBpm)
+            assertTrue(
+                candidate.rejectionReasons.any {
+                    it.contains("Too few neural events coincide")
+                }
+            )
+            assertFalse(result.pulse.quality.safeForAutomaticMix)
+        }
+    }
+
+    @Test
     fun integerRelatedAlternativesRemainVisibleWithoutChangingTheSelectedClock() {
         val spectral =
             listOf(
