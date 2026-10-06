@@ -68,4 +68,16 @@ class BeatGridQualityTest {
             assertTrue(report.issues.any { it.code == "INSUFFICIENT_REFERENCE_COVERAGE" })
         }
     }
+
+    @Test
+    fun internalReferenceGapCannotCountAsMeasuredCoverage() {
+        val beats = List(16) { Beat(0.25 + it * 0.5, 1.0f) }
+        val reference = beats.take(3) + beats.takeLast(3)
+
+        val report =
+            BeatGridQuality.audit(beats, referenceBeats = reference, durationSeconds = 8.0)
+
+        assertFalse(report.safeForAutomaticMix)
+        assertTrue(report.issues.any { it.code == "INSUFFICIENT_REFERENCE_COVERAGE" })
+    }
 }
