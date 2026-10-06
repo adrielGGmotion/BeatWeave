@@ -45,7 +45,8 @@ or non-positive instead of certifying timestamps against malformed source metada
 supply an independent reference clock, it must contain at least three observations; its timestamps
 must be finite, non-negative, strictly ordered, and inside that duration, and its strengths must be
 finite. Malformed or insufficient references fail the audit instead of being filtered out of
-cadence comparisons.
+cadence comparisons. At least 80% of candidate intervals must also be bracketed by the measured
+reference span; the audit does not treat an extrapolated edge cadence as independent evidence.
 Automatic pulse diagnostics report that missing-reference rejection without deriving phase, onset,
 or score evidence from the malformed candidate.
 Clock-quality assessment also streams ordered beat sections without materializing and sorting a
