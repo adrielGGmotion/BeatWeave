@@ -228,6 +228,27 @@ class AutomaticPulseSelectionTest {
     }
 
     @Test
+    fun onsetAgreementRejectsEvidenceWithoutMajorityEnvelopeCoverage() {
+        val full = reference(slow, slow.take(47))
+        val measuredEndFrame =
+            ceil((slow[46].seconds + 0.055) / full.onsetHopSeconds).toInt()
+        val partial = full.copy(onsetEnvelope = full.onsetEnvelope.copyOf(measuredEndFrame + 1))
+
+        val result =
+            AutomaticPulseSelector.select(
+                model(slow),
+                partial,
+                { error("The initial pulse level is already the supported candidate") },
+            )
+
+        val candidate = result.diagnostics.candidates.single { it.bpm == 80.0 }
+        assertEquals(0.0, candidate.onsetAgreement)
+        assertNull(result.diagnostics.selectedBpm)
+        assertTrue(candidate.rejectionReasons.any { it.contains("Too few neural events") })
+        assertFalse(result.pulse.quality.safeForAutomaticMix)
+    }
+
+    @Test
     fun integerRelatedAlternativesRemainVisibleWithoutChangingTheSelectedClock() {
         val spectral =
             listOf(

@@ -412,12 +412,23 @@ object AutomaticPulseSelector {
                 !offset.isFinite()
         )
             return 0.0
+        val tolerance = 0.055
+        val measuredEnd = offset + reference.onsetEnvelope.lastIndex * step
+        if (!measuredEnd.isFinite()) return 0.0
+        var covered = 0
         var count = 0
         for (beat in beats) {
             if (!beat.seconds.isFinite()) return 0.0
+            if (
+                beat.seconds + tolerance < offset ||
+                    beat.seconds - tolerance > measuredEnd
+            )
+                continue
+            covered++
             val frame = (beat.seconds - offset) / step
-            val lo = max(0, ceil(frame - 0.055 / step).toInt())
-            val hi = min(reference.onsetEnvelope.lastIndex, floor(frame + 0.055 / step).toInt())
+            if (!frame.isFinite()) return 0.0
+            val lo = max(0, ceil(frame - tolerance / step).toInt())
+            val hi = min(reference.onsetEnvelope.lastIndex, floor(frame + tolerance / step).toInt())
             if (
                 lo <= hi &&
                     (lo..hi).any {
@@ -428,7 +439,8 @@ object AutomaticPulseSelector {
             )
                 count++
         }
-        return count.toDouble() / beats.size
+        val coverage = covered.toDouble() / beats.size
+        return if (coverage >= 0.55) count.toDouble() / covered else 0.0
     }
 
     private fun localCadenceAgreement(beats: List<Beat>, reference: List<Beat>): Double {
