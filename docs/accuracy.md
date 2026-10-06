@@ -48,6 +48,8 @@ finite. Malformed or insufficient references fail the audit instead of being fil
 cadence comparisons. At least 80% of candidate intervals must also be bracketed by the measured
 reference clock without a gap larger than 1.48 times its local period; the audit does not treat an
 extrapolated edge cadence or an internal observation hole as independent evidence.
+The report exposes that exact measured fraction as `referenceCoverage`; it is `null` when callers
+do not supply a valid independent reference clock. This diagnostic does not relax the 80% gate.
 Automatic pulse diagnostics report that missing-reference rejection without deriving phase, onset,
 or score evidence from the malformed candidate.
 Clock-quality assessment also streams ordered beat sections without materializing and sorting a
