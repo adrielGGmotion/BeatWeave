@@ -113,6 +113,34 @@ class AutomaticPulseSelectionTest {
     }
 
     @Test
+    fun invalidFallbackBeatClockCannotConfirmModelPulse() {
+        val measured = reference(slow)
+        val negativeStart = slow.toMutableList().also { it[0] = it[0].copy(seconds = -0.55) }
+        val outsideEnd =
+            slow.toMutableList().also {
+                it[it.lastIndex] = it.last().copy(seconds = duration)
+            }
+        val nonFiniteStrength =
+            slow.toMutableList().also {
+                it[40] = it[40].copy(strength = Float.NaN)
+            }
+        val invalidReferences =
+            listOf(
+                measured.copy(durationSeconds = Double.POSITIVE_INFINITY),
+                measured.copy(beats = negativeStart),
+                measured.copy(beats = outsideEnd),
+                measured.copy(beats = nonFiniteStrength),
+            )
+
+        for (invalid in invalidReferences) {
+            val pulse = PulseNormalizer.normalize(slow, invalid)
+            assertEquals(0.0, pulse.canonicalAgreement)
+            assertFalse(pulse.quality.safeForAutomaticMix)
+            assertTrue(pulse.quality.issues.any { it.code == "MISSING_REFERENCE" })
+        }
+    }
+
+    @Test
     fun integerRelatedAlternativesRemainVisibleWithoutChangingTheSelectedClock() {
         val spectral =
             listOf(
