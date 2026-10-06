@@ -46,6 +46,15 @@ object BeatGridQuality {
                 0.0,
                 "At least eight beats are required for an automatic transition",
             )
+        if (durationSeconds != null && (!durationSeconds.isFinite() || durationSeconds <= 0.0)) {
+            error(
+                "INVALID_DURATION",
+                0.0,
+                0.0,
+                "A supplied recording duration must be finite and positive",
+            )
+            return BeatGridQualityReport(beats.size, 0.0, issues)
+        }
         if (
             beats.any {
                 !it.seconds.isFinite() ||
