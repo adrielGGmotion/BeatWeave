@@ -474,7 +474,8 @@ object PulseNormalizer {
         val peak =
             (lo..hi)
                 .filter { frame ->
-                    env[frame] >= 0.30f &&
+                    env[frame].isFinite() &&
+                        env[frame] >= 0.30f &&
                         (frame == 0 || env[frame] >= env[frame - 1]) &&
                         (frame == env.lastIndex || env[frame] >= env[frame + 1])
                 }
@@ -486,7 +487,12 @@ object PulseNormalizer {
     }
 
     private fun onsetSupport(analysis: Analysis, time: Double): Double {
-        if (analysis.onsetEnvelope.isEmpty() || analysis.onsetHopSeconds <= 0) return 0.0
+        if (
+            analysis.onsetEnvelope.isEmpty() ||
+                !analysis.onsetHopSeconds.isFinite() ||
+                analysis.onsetHopSeconds <= 0 ||
+                !analysis.onsetTimeOffsetSeconds.isFinite()
+        ) return 0.0
         val lo =
             max(
                 0,
@@ -500,7 +506,13 @@ object PulseNormalizer {
                     .toInt(),
             )
         if (lo > hi) return 0.0
-        return (lo..hi).maxOf { analysis.onsetEnvelope[it].toDouble() }.coerceAtLeast(0.0)
+        return (lo..hi)
+            .maxOf {
+                analysis.onsetEnvelope[it].let { value ->
+                    if (value.isFinite()) value.toDouble() else 0.0
+                }
+            }
+            .coerceAtLeast(0.0)
     }
 
     private fun result(
