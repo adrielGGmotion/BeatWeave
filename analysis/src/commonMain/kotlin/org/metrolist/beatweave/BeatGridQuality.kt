@@ -71,6 +71,23 @@ object BeatGridQuality {
             )
             return BeatGridQualityReport(beats.size, 0.0, issues)
         }
+        if (
+            referenceBeats != null &&
+                (referenceBeats.any {
+                    !it.seconds.isFinite() ||
+                        it.seconds < 0 ||
+                        !it.strength.isFinite() ||
+                        (durationSeconds != null && it.seconds >= durationSeconds)
+                } || referenceBeats.zipWithNext().any { (a, b) -> b.seconds <= a.seconds })
+        ) {
+            error(
+                "INVALID_REFERENCE_CLOCK",
+                0.0,
+                0.0,
+                "Reference beat timestamps must be finite, strictly increasing, and inside the audio",
+            )
+            return BeatGridQualityReport(beats.size, 0.0, issues)
+        }
         val intervals = beats.zipWithNext { a, b -> b.seconds - a.seconds }
         val median = intervals.sorted().let { if (it.isEmpty()) 0.0 else it[it.size / 2] }
         for (i in intervals.indices) {
