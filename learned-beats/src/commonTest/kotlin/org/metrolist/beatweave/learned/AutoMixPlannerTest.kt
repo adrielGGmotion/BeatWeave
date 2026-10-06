@@ -498,21 +498,22 @@ class AutoMixPlannerTest {
     }
 
     @Test
-    fun fixedLengthSearchRecoversCompatibleBarsOutsideTheRankedShortlist() {
+    fun fixedLengthSearchUsesAvailablePairBudgetBeforeDiscardingRankedCues() {
         val outgoing = withBarEnergy(
             song(List(8) { 4 } + List(300) { 3 }), List(308) { -18.0 },
         )
         val incoming = withBarEnergy(song(List(148) { 4 }), List(148) { -18.0 })
         val plan = AutoMixPlanner.transition(outgoing, incoming, bars = 4)
         val selected = assertNotNull(plan.automaticSelection)
-        assertEquals(AutoMixSelectionPolicy.EARLY_INCOMING_LATE_OUTGOING, selected.policy)
-        assertEquals(AutoMixSearchStrategy.ORDERED_TRANSITION_SCAN, selected.search.strategy)
+        assertEquals(AutoMixSelectionPolicy.AUDIO_AWARE_RANKING, selected.policy)
+        assertEquals(AutoMixSearchStrategy.RANKED_TRANSITION_SCAN, selected.search.strategy)
         assertEquals(4, selected.outgoingStartBar)
         assertEquals(0, selected.incomingStartBar)
         assertEquals(List(4) { 4 }, selected.pulsesPerBar)
-        assertNull(selected.musicalCueEvidence)
-        // The ranked Cartesian scan used 128 starts on each side before the ordered retry.
-        assertTrue(selected.search.inspectedPairs > 128 * 128)
+        assertNotNull(selected.musicalCueEvidence)
+        // All 305 outgoing and 145 incoming starts fit inside the 250,000-pair budget.
+        assertEquals(305 * 145, selected.search.inspectedPairs)
+        assertEquals(5L * 145, selected.search.compatibleCandidates)
         assertTrue(selected.search.inspectedPairs <= AutoMixSearchOptions().maximumCandidatePairs)
         assertEquals(5, plan.barMatches.size)
         assertTrue(plan.barMatches.all {

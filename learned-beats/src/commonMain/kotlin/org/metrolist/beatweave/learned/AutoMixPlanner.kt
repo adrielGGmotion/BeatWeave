@@ -250,10 +250,12 @@ object AutoMixPlanner {
     ): LocalMixPlan {
         search.strategy = AutoMixSearchStrategy.RANKED_TRANSITION_SCAN
         val lengths = requestedBars?.let(::listOf) ?: TransitionPlanner.supportedBarCounts.toList()
-        // Limit the Cartesian scan on long recordings without changing any timing acceptance gate.
+        // Size each shortlist from the configured Cartesian budget. A separate fixed cap used to
+        // leave most of the default budget idle for fixed-length searches, which could discard the
+        // only audio-ranked starts with a compatible meter sequence and force an ordered fallback.
         val perTrackLimit =
             sqrt(search.options.maximumCandidatePairs.toDouble() / lengths.size).toInt()
-                .coerceIn(1, 128)
+                .coerceAtLeast(1)
         val candidates = ArrayList<RankedTransition>()
         var pairBudgetReached = false
         lengthScan@ for (bars in lengths) {
