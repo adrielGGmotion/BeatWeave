@@ -90,14 +90,30 @@ object BeatGridQuality {
             return BeatGridQualityReport(beats.size, 0.0, issues)
         }
         val intervals = beats.zipWithNext { a, b -> b.seconds - a.seconds }
-        if (referenceBeats != null) {
-            val referenceStart = referenceBeats.first().seconds
-            val referenceEnd = referenceBeats.last().seconds
-            val coveredIntervals =
-                intervals.indices.count { index ->
-                    val midpoint = beats[index].seconds + intervals[index] / 2
-                    midpoint >= referenceStart && midpoint <= referenceEnd
-                }
+        val referencePeriods = referenceBeats?.let { DoubleArray(intervals.size) { Double.NaN } }
+        if (referenceBeats != null && referencePeriods != null) {
+            var nextReference = 1
+            var coveredIntervals = 0
+            for (index in intervals.indices) {
+                val midpoint = beats[index].seconds + intervals[index] / 2
+                while (
+                    nextReference < referenceBeats.size &&
+                        referenceBeats[nextReference].seconds < midpoint
+                )
+                    nextReference++
+                if (
+                    nextReference >= referenceBeats.size ||
+                        midpoint < referenceBeats[nextReference - 1].seconds
+                )
+                    continue
+                val localPeriod = PulseNormalizer.localPeriod(referenceBeats, midpoint) ?: continue
+                val measuredGap =
+                    referenceBeats[nextReference].seconds -
+                        referenceBeats[nextReference - 1].seconds
+                if (measuredGap / localPeriod > 1.48) continue
+                referencePeriods[index] = localPeriod
+                coveredIntervals++
+            }
             val coverage =
                 if (intervals.isEmpty()) 0.0 else coveredIntervals.toDouble() / intervals.size
             if (coverage < 0.80) {
@@ -124,13 +140,9 @@ object BeatGridQuality {
                 )
             val midpoint = (a + b) / 2
             val local =
-                if (
-                    referenceBeats != null &&
-                        (midpoint < referenceBeats.first().seconds ||
-                            midpoint > referenceBeats.last().seconds)
-                )
-                    null
-                else PulseNormalizer.localPeriod(referenceBeats ?: beats, midpoint)
+                referencePeriods?.get(i)?.takeIf { it.isFinite() }
+                    ?: if (referenceBeats == null) PulseNormalizer.localPeriod(beats, midpoint)
+                    else null
             if (local != null && (interval / local < 0.62 || interval / local > 1.48))
                 error(
                     "PULSE_LEVEL_DISCONTINUITY",
