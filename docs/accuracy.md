@@ -36,6 +36,8 @@ Non-finite onset clocks and envelope values cannot provide independent audio sup
 or relocating canonical pulses.
 The independent fallback beat clock must also have a finite recording duration and finite, strictly
 ordered observations inside that duration before it can confirm or repair the model pulse.
+Automatic pulse diagnostics report that missing-reference rejection without deriving phase, onset,
+or score evidence from the malformed candidate.
 Clock-quality assessment also streams ordered beat sections without materializing and sorting a
 second knot list, and automatic planning polls cancellation throughout that scan.
 The 0.10.0 measurements below predate that change;

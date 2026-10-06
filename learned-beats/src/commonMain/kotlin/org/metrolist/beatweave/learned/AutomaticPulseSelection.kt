@@ -185,6 +185,29 @@ object AutomaticPulseSelector {
                         model.downbeatSeconds,
                         activations,
                     )
+            val missingReference =
+                pulse.quality.issues.firstOrNull { it.code == "MISSING_REFERENCE" }
+            if (missingReference != null) {
+                reasons += "MISSING_REFERENCE: ${missingReference.message}"
+                evaluated +=
+                    Evaluation(
+                        PulseCandidateAssessment(
+                            candidate.bpm,
+                            candidate.support,
+                            0.0,
+                            0.0,
+                            0.0,
+                            0.0,
+                            false,
+                            false,
+                            reasons.toList(),
+                            pulse.quality,
+                        ),
+                        reference,
+                        pulse,
+                    )
+                continue
+            }
             var phaseEvidence =
                 PulsePhaseAudit.assess(model.beats, reference.beats, cancellationCheck)
             if (phaseEvidence.relation == PulsePhaseRelation.REGIONAL_SUPPORT) {
