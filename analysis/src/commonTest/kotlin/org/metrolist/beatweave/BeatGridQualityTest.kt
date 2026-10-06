@@ -36,4 +36,17 @@ class BeatGridQualityTest {
             assertTrue(report.issues.any { it.code == "INVALID_REFERENCE_CLOCK" })
         }
     }
+
+    @Test
+    fun insufficientReferenceClockCannotDisableCadenceAudit() {
+        val beats = List(16) { Beat(0.25 + it * 0.5, 1.0f) }
+
+        for (reference in listOf(emptyList(), beats.take(1), beats.take(2))) {
+            val report =
+                BeatGridQuality.audit(beats, referenceBeats = reference, durationSeconds = 8.0)
+
+            assertFalse(report.safeForAutomaticMix)
+            assertTrue(report.issues.any { it.code == "INVALID_REFERENCE_CLOCK" })
+        }
+    }
 }
