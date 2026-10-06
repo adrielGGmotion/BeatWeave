@@ -9,6 +9,50 @@ import kotlin.test.assertTrue
 
 class BeatGridQualityTest {
     @Test
+    fun eachMultiPulseInsertionRequiresMeasuredReferenceCadence() {
+        val completeModel = List(17) { Beat(0.26 + it * 0.5, 1.0f) }
+        val modelBeats =
+            completeModel.filterIndexed { index, _ -> index !in setOf(3, 4, 5) }
+        val onsetEnvelope =
+            FloatArray(900).also {
+                it[175] = 1.0f
+                it[225] = 1.0f
+                it[275] = 1.0f
+            }
+        val referenceBeats =
+            List(18) { Beat(0.25 + it * 0.5, 1.0f) }
+                .filterIndexed { index, _ -> index != 3 }
+        val reference =
+            Analysis(
+                durationSeconds = 9.0,
+                bpm = 120.0,
+                tempoConfidence = 1.0,
+                beats = referenceBeats,
+                rmsDb = -12.0,
+                peakDb = -1.0,
+                spectralCentroidHz = 500.0,
+                keyEstimate = "unknown",
+                keyConfidence = 0.0,
+                energyBlocks = emptyList(),
+                onsetEnvelope = onsetEnvelope,
+                onsetHopSeconds = 0.01,
+                warnings = emptyList(),
+            )
+
+        val result = PulseNormalizer.normalize(modelBeats, reference)
+
+        assertEquals(12.0 / 13.0, result.canonicalAgreement, 1e-12)
+        assertEquals(14.0 / 15.0, assertNotNull(result.quality.referenceCoverage), 1e-12)
+        assertTrue(result.beats.none { kotlin.math.abs(it.seconds - 1.75) < 1e-12 })
+        assertEquals(
+            2,
+            result.repairs.count { it.kind == PulseRepairKind.AUDIO_SUPPORTED_INSERTION },
+        )
+        assertFalse(result.quality.safeForAutomaticMix)
+        assertTrue(result.quality.issues.any { it.code == "UNSUPPORTED_INSERTION" })
+    }
+
+    @Test
     fun unmeasuredReferenceGapCannotInterpolateQuietPulse() {
         val completeModel = List(17) { Beat(0.26 + it * 0.5, 1.0f) }
         val modelBeats =
