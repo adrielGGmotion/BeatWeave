@@ -50,6 +50,8 @@ reference clock without a gap larger than 1.48 times its local period; the audit
 extrapolated edge cadence or an internal observation hole as independent evidence.
 The report exposes that exact measured fraction as `referenceCoverage`; it is `null` when callers
 do not supply a valid independent reference clock. This diagnostic does not relax the 80% gate.
+Canonical pulse agreement likewise scores only intervals bracketed by usable reference observations;
+unmeasured edges and internal holes cannot raise its numerator or denominator.
 Automatic pulse diagnostics report that missing-reference rejection without deriving phase, onset,
 or score evidence from the malformed candidate.
 Clock-quality assessment also streams ordered beat sections without materializing and sorting a

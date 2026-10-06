@@ -245,7 +245,7 @@ object PulseNormalizer {
             rawBeats
                 .zipWithNext()
                 .mapNotNull { (a, b) ->
-                    localPeriod(reference, (a.seconds + b.seconds) / 2)?.let {
+                    measuredLocalPeriod(reference, (a.seconds + b.seconds) / 2)?.let {
                         abs((b.seconds - a.seconds) / it - 1) < 0.22
                     }
                 }
@@ -518,6 +518,18 @@ object PulseNormalizer {
                 .filter { it > 0 && it.isFinite() }
                 .sorted()
         return intervals.getOrNull(intervals.size / 2)
+    }
+
+    /** A local cadence is evidence only when two nearby reference observations bracket it. */
+    private fun measuredLocalPeriod(beats: List<Beat>, at: Double): Double? {
+        val next =
+            lowerBound(beats, at).let {
+                if (it == 0 && at == beats.first().seconds) 1 else it
+            }
+        if (next == 0 || next == beats.size) return null
+        val period = localPeriod(beats, at) ?: return null
+        val measuredGap = beats[next].seconds - beats[next - 1].seconds
+        return period.takeIf { measuredGap / it <= 1.48 }
     }
 
     private fun nearest(beats: List<Beat>, at: Double): Beat? {
