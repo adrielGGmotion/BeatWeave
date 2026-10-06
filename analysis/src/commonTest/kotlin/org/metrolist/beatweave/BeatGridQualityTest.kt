@@ -1,7 +1,10 @@
 package org.metrolist.beatweave
 
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class BeatGridQualityTest {
@@ -74,19 +77,25 @@ class BeatGridQualityTest {
         val beats = List(16) { Beat(0.25 + it * 0.5, 1.0f) }
         val reference = beats.take(3) + beats.takeLast(3)
 
-        assertTrue(
+        val isolatedGap =
             BeatGridQuality.audit(
-                    beats,
-                    referenceBeats = beats.filterIndexed { index, _ -> index != 8 },
-                    durationSeconds = 8.0,
-                )
-                .safeForAutomaticMix
+                beats,
+                referenceBeats = beats.filterIndexed { index, _ -> index != 8 },
+                durationSeconds = 8.0,
+            )
+        assertTrue(isolatedGap.safeForAutomaticMix)
+        assertEquals(13.0 / 15.0, assertNotNull(isolatedGap.referenceCoverage), 1e-12)
+
+        assertNull(
+            BeatGridQuality.audit(beats, durationSeconds = 8.0).referenceCoverage,
+            "No independent reference means coverage was not measured",
         )
 
         val report =
             BeatGridQuality.audit(beats, referenceBeats = reference, durationSeconds = 8.0)
 
         assertFalse(report.safeForAutomaticMix)
+        assertEquals(4.0 / 15.0, assertNotNull(report.referenceCoverage), 1e-12)
         assertTrue(report.issues.any { it.code == "INSUFFICIENT_REFERENCE_COVERAGE" })
     }
 }

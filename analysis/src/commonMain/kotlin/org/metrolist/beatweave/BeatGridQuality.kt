@@ -19,6 +19,8 @@ data class BeatGridQualityReport(
     val beatCount: Int,
     val medianBpm: Double,
     val issues: List<BeatGridIssue>,
+    /** Fraction of candidate intervals with usable independent reference evidence, if measured. */
+    val referenceCoverage: Double? = null,
 ) {
     val safeForAutomaticMix: Boolean
         get() = beatCount >= 8 && issues.none { it.severity == BeatIssueSeverity.ERROR }
@@ -91,6 +93,7 @@ object BeatGridQuality {
         }
         val intervals = beats.zipWithNext { a, b -> b.seconds - a.seconds }
         val referencePeriods = referenceBeats?.let { DoubleArray(intervals.size) { Double.NaN } }
+        var referenceCoverage: Double? = null
         if (referenceBeats != null && referencePeriods != null) {
             var nextReference = 1
             var coveredIntervals = 0
@@ -116,6 +119,7 @@ object BeatGridQuality {
             }
             val coverage =
                 if (intervals.isEmpty()) 0.0 else coveredIntervals.toDouble() / intervals.size
+            referenceCoverage = coverage
             if (coverage < 0.80) {
                 error(
                     "INSUFFICIENT_REFERENCE_COVERAGE",
@@ -123,7 +127,7 @@ object BeatGridQuality {
                     beats.lastOrNull()?.seconds ?: 0.0,
                     "Independent reference brackets only ${(coverage * 100).roundToInt()}% of candidate intervals",
                 )
-                return BeatGridQualityReport(beats.size, 0.0, issues)
+                return BeatGridQualityReport(beats.size, 0.0, issues, referenceCoverage)
             }
         }
         val median = intervals.sorted().let { if (it.isEmpty()) 0.0 else it[it.size / 2] }
@@ -158,7 +162,12 @@ object BeatGridQuality {
                     "Consecutive beat periods change too abruptly for automatic stretching",
                 )
         }
-        return BeatGridQualityReport(beats.size, if (median > 0) 60 / median else 0.0, issues)
+        return BeatGridQualityReport(
+            beats.size,
+            if (median > 0) 60 / median else 0.0,
+            issues,
+            referenceCoverage,
+        )
     }
 }
 
