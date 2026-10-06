@@ -56,8 +56,9 @@ Duplicate-pulse removal also requires that measured cadence at the short interva
 does not delete an original model observation using an extrapolated edge or internal-gap period.
 Weak-pulse relocation applies the same rule in both correction passes, so an audio attack outside
 measured reference cadence cannot move an original model timestamp onto an extrapolated grid.
-Missing-pulse insertion also requires measured reference cadence across the model gap; an onset
-outside that coverage cannot regularize the model clock using an extrapolated period.
+Missing-pulse insertion requires measured reference cadence across the model gap and separately at
+every implied pulse; an onset outside that coverage cannot regularize the model clock using an
+extrapolated period.
 Quiet cadence interpolation likewise requires measured cadence at the implied pulse itself, so
 supported repairs on either side cannot bridge an internal reference hole.
 Automatic pulse diagnostics report that missing-reference rejection without deriving phase, onset,
