@@ -511,10 +511,16 @@ object AutoMixPlanner {
             return Candidate(outgoing, incoming, count, (duration * outputSampleRate).roundToLong())
         }
         val heap = CandidateHeap()
-        for (outgoing in 0 until a.grid.barCount) {
+        var pairBudgetReached = false
+        streamScan@ for (outgoing in 0 until a.grid.barCount) {
             search.checkCancellation()
             if (a.endByStart[outgoing] - outgoing < minimum) continue
             for (run in runs) {
+                if (search.pairs >= search.options.maximumCandidatePairs) {
+                    search.checkCancellation()
+                    pairBudgetReached = true
+                    break@streamScan
+                }
                 search.inspect()
                 search.compatible += (run.endExclusive - run.start).toLong()
                 heap.add(
@@ -548,15 +554,25 @@ object AutoMixPlanner {
                 )
             if (result != null) return result
             if (current.incoming + 1 < stream.endExclusive) {
-                search.inspect()
-                heap.add(
-                    stream.copy(
-                        candidate =
-                            candidate(current.outgoing, current.incoming + 1, stream.supportEnd)
+                if (search.pairs >= search.options.maximumCandidatePairs) {
+                    search.checkCancellation()
+                    pairBudgetReached = true
+                } else {
+                    search.inspect()
+                    heap.add(
+                        stream.copy(
+                            candidate =
+                                candidate(current.outgoing, current.incoming + 1, stream.supportEnd)
+                        )
                     )
-                )
+                }
             }
         }
+        if (pairBudgetReached)
+            search.fail(
+                AutoMixFailureCode.SEARCH_LIMIT_REACHED,
+                "Candidate-pair budget exhausted; no collected candidate passed all checks",
+            )
         search.decline()
     }
 

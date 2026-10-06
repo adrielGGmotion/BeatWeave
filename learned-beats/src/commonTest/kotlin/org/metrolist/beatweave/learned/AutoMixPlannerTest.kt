@@ -928,15 +928,16 @@ class AutoMixPlannerTest {
     @Test
     fun boundedSearchAndCancellationReturnExplicitOutcomes() {
         val a = song(List(12) { 4 })
-        val limited =
-            assertFailsWith<AutoMixPlanningException> {
-                AutoMixPlanner.overlap(
-                    a,
-                    a,
-                    searchOptions = AutoMixSearchOptions(maximumCandidatePairs = 1),
-                )
-            }
-        assertEquals(AutoMixFailureCode.SEARCH_LIMIT_REACHED, limited.report.failure)
+        val bounded =
+            AutoMixPlanner.overlap(
+                a,
+                a,
+                searchOptions = AutoMixSearchOptions(maximumCandidatePairs = 1),
+            )
+        val selected = assertNotNull(bounded.automaticSelection)
+        assertEquals(12, selected.barCount)
+        assertEquals(1, selected.search.inspectedPairs)
+        assertEquals(11L, selected.search.compatibleCandidates)
         assertFailsWith<MixCancelledException> {
             AutoMixPlanner.transition(a, a, isCancelled = { true })
         }
@@ -945,6 +946,24 @@ class AutoMixPlannerTest {
                 AutoMixPlanner.overlap(a.copy(barTracking = null), a)
             }
         assertEquals(AutoMixFailureCode.NO_CONFIDENT_BAR_GRID, absent.report.failure)
+    }
+
+    @Test
+    fun boundedConstantMeterSearchFitsUnsafeCandidateBeforeReportingExhaustion() {
+        val failure =
+            assertFailsWith<AutoMixPlanningException> {
+                AutoMixPlanner.overlap(
+                    song(List(4) { 4 }),
+                    song(List(4) { 4 }, period = 0.6),
+                    qualityLimits = WarpQualityLimits(maximumPlaybackSpeed = 1.01),
+                    searchOptions = AutoMixSearchOptions(maximumCandidatePairs = 1),
+                )
+            }
+
+        assertEquals(AutoMixFailureCode.SEARCH_LIMIT_REACHED, failure.report.failure)
+        assertEquals(AutoMixSearchStrategy.CONSTANT_METER_MERGE, failure.report.strategy)
+        assertEquals(1, failure.report.inspectedPairs)
+        assertEquals(1, failure.report.rejectedClocks)
     }
 
     @Test
