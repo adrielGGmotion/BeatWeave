@@ -120,6 +120,7 @@ class AutomaticPulseSelectionTest {
             slow.toMutableList().also {
                 it[it.lastIndex] = it.last().copy(seconds = duration)
             }
+        val duplicateTime = slow.toMutableList().also { it[40] = it[39] }
         val nonFiniteStrength =
             slow.toMutableList().also {
                 it[40] = it[40].copy(strength = Float.NaN)
@@ -129,6 +130,7 @@ class AutomaticPulseSelectionTest {
                 measured.copy(durationSeconds = Double.POSITIVE_INFINITY),
                 measured.copy(beats = negativeStart),
                 measured.copy(beats = outsideEnd),
+                measured.copy(beats = duplicateTime),
                 measured.copy(beats = nonFiniteStrength),
             )
 
