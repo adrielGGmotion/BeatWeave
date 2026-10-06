@@ -49,4 +49,23 @@ class BeatGridQualityTest {
             assertTrue(report.issues.any { it.code == "INVALID_REFERENCE_CLOCK" })
         }
     }
+
+    @Test
+    fun partialReferenceClockCannotCorroborateUnmeasuredGrid() {
+        val beats = List(16) { Beat(0.25 + it * 0.5, 1.0f) }
+
+        assertTrue(BeatGridQuality.audit(beats, durationSeconds = 8.0).safeForAutomaticMix)
+        assertTrue(
+            BeatGridQuality.audit(beats, referenceBeats = beats, durationSeconds = 8.0)
+                .safeForAutomaticMix
+        )
+
+        for (reference in listOf(beats.take(3), beats.takeLast(3))) {
+            val report =
+                BeatGridQuality.audit(beats, referenceBeats = reference, durationSeconds = 8.0)
+
+            assertFalse(report.safeForAutomaticMix)
+            assertTrue(report.issues.any { it.code == "INSUFFICIENT_REFERENCE_COVERAGE" })
+        }
+    }
 }
