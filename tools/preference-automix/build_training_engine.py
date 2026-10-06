@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compile the unchanged planner with a training-only candidate observer.
+"""Compile the current production planner with a training-only candidate observer.
 
 The generated source adds one observation call in the ranked scan. It leaves
 ranking, shortlists, candidate order, clock fits and acceptance limits intact.
@@ -36,10 +36,14 @@ def build(release):
     engine=engine.replace('"beatweave-manual-pilot-v1")',
         'System.getProperty("beatweave.cueModelId","beatweave-manual-pilot-v1"))')
     main=work/'PreferenceEngine.kt';main.write_text(engine)
+    engine=engine.replace('LocalSongAnalyzer(backend)', 'LocalSongAnalyzer(CandidateRecorder.cached(backend))')
+    engine=engine.replace('            a\n        }', '            CandidateRecorder.audit(a,output,index)\n            a\n        }')
+    main.write_text(engine)
     sources=[]
     for folder in ['analysis/src/commonMain','learned-beats/src/commonMain','learned-beats/src/ortMain']:
         sources.extend(p for p in (ROOT/folder).rglob('*.kt') if p!=planner)
     sources.extend([generated,main,ROOT/'tools/preference-automix/CandidateRecorder.kt'])
+    sources.append(ROOT/'tools/preference-automix/EnsembleEngine.kt')
     jar=work/'training-engine.jar'
     subprocess.run(['java','-Xmx2g','-cp',cp,'org.jetbrains.kotlin.cli.jvm.K2JVMCompiler',
         '-no-stdlib','-no-reflect','-jvm-target','1.8','-classpath',cp,'-d',str(jar),*map(str,sources)],check=True)
@@ -47,6 +51,7 @@ def build(release):
     (work/'instrumentation.json').write_text(json.dumps({'planner_sha256':hashlib.sha256(planner.read_bytes()).hexdigest(),
         'observed_planner_sha256':hashlib.sha256(generated.read_bytes()).hexdigest(),
         'changes':'One candidate-recording call; otherwise original planner source unchanged',
+        'entrypoints':'Optional exact reference features, diagnostics and content-keyed detector logit cache; ensemble entrypoint calls AutoMixAnalysisEnsemble. None supplies playback cues.',
         'candidate_scope':'Production supported bar/pulse shortlists and meter-compatible pairs; final clock fitting is done only when a candidate is selected.'},indent=2)+'\n')
     print(jar,flush=True)
 

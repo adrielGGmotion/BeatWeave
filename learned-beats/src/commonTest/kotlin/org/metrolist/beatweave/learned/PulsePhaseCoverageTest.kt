@@ -134,6 +134,16 @@ class PulsePhaseCoverageTest {
     }
 
     @Test
+    fun directlyMeasuredPhraseAfterUncoveredPrefixDoesNotLoseEightMoreBeats() {
+        val (result, song) = select(observed, reference.drop(8))
+        assertTrue(result.pulse.quality.issues.any { it.code == "UNCERTAIN_REFERENCE_PHASE" })
+        assertTrue(result.regions.accepted.any { it.contains(8, 17) })
+        song.requirePulseRange(8, 17)
+        assertFailsWith<IllegalArgumentException> { song.requirePulseRange(0, 9) }
+        assertEquals(observed, result.pulse.beats)
+    }
+
+    @Test
     fun constantAlignedClockRetainsWholeTrackSupportAndOriginalTimestamps() {
         val (result, song) = select(observed)
         assertTrue(result.pulse.quality.safeForAutomaticMix)

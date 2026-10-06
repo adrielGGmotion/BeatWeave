@@ -68,6 +68,17 @@ data class LocalSongAnalysis(
         )
     }
 
+    internal fun transitionMatchingGrid(startBeat: Int, endBeatExclusive: Int): BeatGrid {
+        requirePulseGeometryRange(startBeat, endBeatExclusive)
+        acousticPulse?.let {
+            it.requireClock(pulse.beats.map { beat -> beat.seconds }.toDoubleArray())
+            require(it.assessTransitionRange(startBeat, endBeatExclusive).supported) {
+                "Selected transition lacks recurring attacks or contains an unsupported quiet span"
+            }
+        }
+        return BeatGrid(pulse.beats.subList(startBeat, endBeatExclusive).map { it.seconds }.toDoubleArray())
+    }
+
     /**
      * Inspectable proposed geometry, including songs with rejected regions. A planner must still
      * requirePulseRange and validate the selected bar evidence before rendering.

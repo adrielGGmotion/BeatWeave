@@ -52,6 +52,8 @@ data class AutoMixTrackDiagnostic(
     val sourcePulseErrorCodes: List<String>,
     /** Null for caller-supplied analyses without an independent acoustic audit. */
     val acousticallySupportedBars: Int? = null,
+    /** True when centered bar masks are diagnostic and acoustics are checked on each full cue. */
+    val acousticCheckDeferredToCandidate: Boolean = false,
 )
 
 data class AutoMixSearchReport(
@@ -267,7 +269,10 @@ object AutoMixPlanner {
                 (0..song.grid.barCount - bars)
                     .filter {
                         song.endByStart[it] - it >= bars &&
-                            (outgoing || containsIncomingPins(song.grid, it, bars, fitOptions))
+                            (outgoing || containsIncomingPins(song.grid, it, bars, fitOptions)) &&
+                            transitionAcousticsSupported(
+                                if (outgoing) first else second, song.grid, it, bars,
+                            )
                     }
                     .map {
                         RankedStart(
@@ -670,6 +675,11 @@ object AutoMixPlanner {
                 AutoMixFailureCode.SOURCE_COVERAGE_INVALID,
                 "Bar anchors must use the same canonical source clock and lie inside the recording",
             )
+        // Acoustic recurrence depends on the complete selected transition, which does not exist
+        // yet. A centered single-bar mask may reach outside it and reject a valid phrase entrance.
+        // Overlap mode keeps its existing support semantics.
+        val deferAcoustics = search.mode == MixMode.TRANSITION && song.acousticPulse != null
+        val eligibility = if (deferAcoustics) tracking.withDeferredAcousticSupport() else tracking
         val endByStart = IntArray(grid.barCount)
         var phaseUsable = 0
         var pulseSupported = 0
@@ -698,7 +708,7 @@ object AutoMixPlanner {
                     }
             if (pulseUsable) pulseSupported++ else issues += BarUsabilityIssue.UNSUPPORTED_PULSE
             for (issue in issues) reasonCounts[issue] = (reasonCounts[issue] ?: 0) + 1
-            if (!tracking.isBarUsable(bar) || !pulseUsable) {
+            if (!eligibility.isBarUsable(bar) || !pulseUsable) {
                 contiguousEnd = bar
                 endByStart[bar] = bar
                 continue
@@ -710,7 +720,9 @@ object AutoMixPlanner {
                 val end = (low + high + 1) ushr 1
                 val usable =
                     try {
-                        song.requirePulseRange(grid.boundary(bar), grid.boundary(end) + 1)
+                        if (deferAcoustics)
+                            song.requirePulseGeometryRange(grid.boundary(bar), grid.boundary(end) + 1)
+                        else song.requirePulseRange(grid.boundary(bar), grid.boundary(end) + 1)
                         true
                     } catch (_: IllegalArgumentException) {
                         false
@@ -733,6 +745,7 @@ object AutoMixPlanner {
                     .map { it.code }
                     .distinct(),
                 tracking.barAcousticPulseSupported?.count { it },
+                deferAcoustics,
             )
         return SupportedBars(grid, endByStart)
     }
@@ -775,20 +788,29 @@ object AutoMixPlanner {
         require(sameBars(a, b, outgoing, incoming, bars)) {
             "Every corresponding bar must contain the same number of canonical pulses"
         }
-        first.barTracking?.requireUsable(outgoing, bars)
-        second.barTracking?.requireUsable(incoming, bars)
+        fun checkedBars(song: LocalSongAnalysis): BarTrackingResult? =
+            if (mode == MixMode.TRANSITION && song.acousticPulse != null)
+                song.barTracking?.withDeferredAcousticSupport()
+            else song.barTracking
+        checkedBars(first)?.requireUsable(outgoing, bars)
+        checkedBars(second)?.requireUsable(incoming, bars)
         // Independently check each bar even for caller-assembled analyses. A
         // quiet/unsupported bar cannot borrow activity from its louder neighbor.
         for (index in 0 until bars) {
             if (isCancelled()) throw MixCancelledException()
-            first.requirePulseRange(
-                a.boundary(outgoing + index),
-                a.boundary(outgoing + index + 1) + 1,
-            )
-            second.requirePulseRange(
-                b.boundary(incoming + index),
-                b.boundary(incoming + index + 1) + 1,
-            )
+            if (mode == MixMode.TRANSITION) {
+                first.requirePulseGeometryRange(a.boundary(outgoing + index), a.boundary(outgoing + index + 1) + 1)
+                second.requirePulseGeometryRange(b.boundary(incoming + index), b.boundary(incoming + index + 1) + 1)
+                require(first.acousticPulse?.assessActivityRange(
+                    a.boundary(outgoing + index), a.boundary(outgoing + index + 1) + 1,
+                )?.supported != false) { "Outgoing bar lacks direct acoustic activity" }
+                require(second.acousticPulse?.assessActivityRange(
+                    b.boundary(incoming + index), b.boundary(incoming + index + 1) + 1,
+                )?.supported != false) { "Incoming bar lacks direct acoustic activity" }
+            } else {
+                first.requirePulseRange(a.boundary(outgoing + index), a.boundary(outgoing + index + 1) + 1)
+                second.requirePulseRange(b.boundary(incoming + index), b.boundary(incoming + index + 1) + 1)
+            }
         }
         val aStart = a.boundary(outgoing)
         val aEnd = a.boundary(outgoing + bars)
@@ -797,8 +819,10 @@ object AutoMixPlanner {
         require(fitOptions.pinnedIncomingBeats.all { it in bStart..bEnd }) {
             "Pinned incoming canonical beat lies outside the selected bar range"
         }
-        val firstGrid = first.matchingGrid(aStart, aEnd + 1)
-        val secondGrid = second.matchingGrid(bStart, bEnd + 1)
+        val firstGrid = if (mode == MixMode.TRANSITION) first.transitionMatchingGrid(aStart, aEnd + 1)
+            else first.matchingGrid(aStart, aEnd + 1)
+        val secondGrid = if (mode == MixMode.TRANSITION) second.transitionMatchingGrid(bStart, bEnd + 1)
+            else second.matchingGrid(bStart, bEnd + 1)
         require(
             first.audio.durationSeconds.isFinite() &&
                 second.audio.durationSeconds.isFinite() &&
@@ -893,6 +917,9 @@ object AutoMixPlanner {
         musicalCueEvidence: MusicalCueEvidence? = null,
     ): LocalMixPlan? {
         if (!containsIncomingPins(b, incoming, bars, fitOptions)) return null
+        if (mode == MixMode.TRANSITION &&
+            (!transitionAcousticsSupported(first, a, outgoing, bars) ||
+                !transitionAcousticsSupported(second, b, incoming, bars))) return null
         search.beforeFit()
         val selection =
             AutoMixSelection(
@@ -932,6 +959,17 @@ object AutoMixPlanner {
         } catch (_: UnsafeClockFitException) {
             search.rejectedClocks++
             null
+        }
+    }
+
+    private fun transitionAcousticsSupported(
+        song: LocalSongAnalysis, grid: BarGrid, start: Int, bars: Int,
+    ): Boolean {
+        val evidence = song.acousticPulse ?: return true
+        if (!evidence.assessTransitionRange(grid.boundary(start), grid.boundary(start + bars) + 1).supported)
+            return false
+        return (start until start + bars).all {
+            evidence.assessActivityRange(grid.boundary(it), grid.boundary(it + 1) + 1).supported
         }
     }
 

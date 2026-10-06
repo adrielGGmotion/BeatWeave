@@ -181,6 +181,28 @@ internal constructor(
      * 4 to beat 8 is queried as (4, 9), covering intervals 4, 5, 6 and 7.
      */
     fun assessRange(startBeat: Int, endBeatExclusive: Int): AcousticPulseRangeAssessment {
+        return assessRange(startBeat, endBeatExclusive, selectedContext = false)
+    }
+
+    /**
+     * Audits an entire proposed transition. With at least eight measured intervals, clamp the
+     * context window to the selected range instead of borrowing a preceding breakdown or a later
+     * outro. The window is chosen by geometry, never by its score. Shorter ranges retain the
+     * centered-context rule. Local activity and recurrence thresholds are unchanged.
+     */
+    fun assessTransitionRange(startBeat: Int, endBeatExclusive: Int): AcousticPulseRangeAssessment =
+        assessRange(startBeat, endBeatExclusive, selectedContext = true)
+
+    /** Direct activity only; pair with recurrence for the full candidate, never use alone. */
+    fun assessActivityRange(startBeat: Int, endBeatExclusive: Int): AcousticPulseRangeAssessment =
+        assessRange(startBeat, endBeatExclusive, selectedContext = false, recurrence = false)
+
+    private fun assessRange(
+        startBeat: Int,
+        endBeatExclusive: Int,
+        selectedContext: Boolean,
+        recurrence: Boolean = true,
+    ): AcousticPulseRangeAssessment {
         require(
             startBeat >= 0 &&
                 endBeatExclusive >= 0 &&
@@ -193,10 +215,13 @@ internal constructor(
         var active = 0
         var previousInactive = false
         for (interval in startBeat until endBeatExclusive - 1) {
-            val windowIndex = interval - 4
-            if (windowIndex !in windowValues.indices) {
+            val windowIndex =
+                if (selectedContext && endBeatExclusive - startBeat - 1 >= 8)
+                    (interval - 4).coerceIn(startBeat, endBeatExclusive - 1 - 8)
+                else interval - 4
+            if (recurrence && windowIndex !in windowValues.indices) {
                 issues += AcousticPulseIssue.INSUFFICIENT_CONTEXT
-            } else if (!windowValues[windowIndex].supported) {
+            } else if (recurrence && !windowValues[windowIndex].supported) {
                 issues += AcousticPulseIssue.NONRECURRING_ATTACKS
             }
             val inactive = !isActive(interval)

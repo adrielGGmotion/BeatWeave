@@ -69,6 +69,32 @@ class AcousticPulseEvidenceTest {
     }
 
     @Test
+    fun fullTransitionUsesMeasuredContextInsideItsOwnEdges() {
+        val report = AcousticPulseEvidence.assess(features(), regularClock())
+        assertFalse(report.supportsRange(0, 17))
+        assertTrue(report.assessTransitionRange(0, 17).supported)
+        assertTrue(report.assessTransitionRange(48, 65).supported)
+        // Eight real intervals are still required; no tail observation is extrapolated.
+        assertFalse(report.assessTransitionRange(60, 65).supported)
+    }
+
+    @Test
+    fun selectedPhraseDoesNotBorrowBreakdownContextOrHideAnInternalQuietBar() {
+        val quietOutside = AcousticPulseEvidence.assess(
+            features(quietIntervals = ((0..23) + (40..64)).toSet()), regularClock(),
+        )
+        assertTrue(quietOutside.assessTransitionRange(24, 41).supported)
+        val quietInside = AcousticPulseEvidence.assess(
+            features(quietIntervals = (28..31).toSet()), regularClock(),
+        )
+        assertFalse(quietInside.assessTransitionRange(24, 41).supported)
+        assertTrue(AcousticPulseIssue.INSUFFICIENT_LOCAL_ATTACKS in
+            quietInside.assessTransitionRange(24, 41).issues)
+        val irregular = AcousticPulseEvidence.assess(features(irregular = true), regularClock())
+        assertFalse(irregular.assessTransitionRange(0, 17).supported)
+    }
+
+    @Test
     fun isolatedRestsCanBeSupportedButAdjacentUnobservedIntervalsCannot() {
         val isolated =
             AcousticPulseEvidence.assess(features(quietIntervals = setOf(25)), regularClock())

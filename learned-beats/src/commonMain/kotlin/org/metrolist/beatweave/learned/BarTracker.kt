@@ -242,6 +242,17 @@ internal constructor(
         )
     }
 
+    /**
+     * Transition enumeration checks acoustics after its complete range is known. Keep all meter,
+     * boundary and pulse evidence; only the centered per-bar acoustic mask is deferred. This
+     * object cannot by itself certify a transition: LocalSongAnalysis audits that selected range.
+     */
+    internal fun withDeferredAcousticSupport(): BarTrackingResult =
+        BarTrackingResult(
+            seconds, rawDownbeatSeconds, boundaries, regions, edits, statePosteriors,
+            regionSupported, options, pulseSupport, null,
+        )
+
     /** Proposed geometry only. Call [requireUsable] on the selected range before using it. */
     fun grid(): BarGrid {
         if (boundaries.size < 2)

@@ -512,11 +512,14 @@ object PulseRegions {
         val exclusions = ArrayList<ExcludedPulseRegion>()
         for (error in errors) {
             cancellationCheck()
-            // The cadence estimator uses eight neighbouring pulses on each side. Exclude
-            // that context as well, rather than treating the next beat as independent.
-            val from = max(0, AutomaticPulseSelector.lowerBound(beats, error.startSeconds) - 8)
+            // Cadence errors depend on an eight-pulse neighborhood. Local reference-phase
+            // failures already identify individually measured unsupported events; padding them
+            // again suppresses independently supported phrase starts after the rejected span.
+            // Every resulting island is still re-audited below against the reference clock.
+            val context = if (error.code == "UNCERTAIN_REFERENCE_PHASE") 0 else 8
+            val from = max(0, AutomaticPulseSelector.lowerBound(beats, error.startSeconds) - context)
             val through =
-                min(beats.lastIndex, AutomaticPulseSelector.lowerBound(beats, error.endSeconds) + 8)
+                min(beats.lastIndex, AutomaticPulseSelector.lowerBound(beats, error.endSeconds) + context)
             for (index in from..through) blocked[index] = true
             exclusions +=
                 ExcludedPulseRegion(

@@ -1,6 +1,112 @@
 # Preference training and automatic listening tests
 
-## Round 5: full-span faders and experimental cue training
+## Round 6: candidate coverage and feasible-window cue training
+
+The previous scorer could not choose some approved windows because candidate
+generation discarded them first. This round changes the actual library planner
+on this experimental branch, then fits a new scorer on its supported candidates.
+The whole update remains in draft; neither the search change nor the new scorer
+has established a broad listening-quality improvement.
+
+- For transitions, acoustic recurrence uses an eight-interval window clamped
+  inside the selected span when that span contains enough measured intervals.
+  The context is chosen by geometry, never by the best score. Short spans retain
+  centered context. Per-bar direct activity, phase/meter, pulse geometry and
+  final clock checks remain required, with unchanged numerical thresholds.
+- `UNCERTAIN_REFERENCE_PHASE` already identifies individually unsupported
+  events. Removing its extra eight-beat exclusion padding recovers independently
+  supported phrase starts; every remaining island is still re-audited. Other
+  cadence failures retain their context padding. No beats are extrapolated.
+- `AutoMixAnalysisEnsemble.bestTransition` accepts one or two independently
+  measured analyses per track and compares up to four normal searches. It uses
+  the same scorer and acceptance gates in each pool and selects the highest
+  accepted score, preferring the earlier pool on ties. Original source clocks
+  are never combined or shifted. Each pool keeps its normal search budget.
+  The caller must supply analyses of the same recording/decoder: the API checks
+  equal decoded duration, while this experiment also verifies source hashes.
+  Incoming beat-index pins require a single incoming analysis.
+
+The ensemble audition uses the existing released Beat This small0 and final0
+models. Neither detector was trained here. final0 was obtained from the official
+BeatWeave v0.10.0 model archive; its SHA-256 is
+`c8293b7b787e73b40ad5e899624dbe08763268031543ef7ebcab53f8e78da66f`.
+The larger model and extra searches cost more CPU/memory. No T470 benchmark is
+claimed. Single-analysis library entrypoints remain available.
+
+`train_cues_round6.py` fits all 104 existing linear/quadratic weights, anchored to
+the prior checkpoint with a fixed L2 coefficient of 0.5. The model sees acoustic
+and positional features, not song names or pair identifiers. Positives must be
+actual supported candidates matching both approved starts (31 ms tolerance),
+both ends (150 ms tolerance) and bar count. Only three of five personal windows
+are now available; unavailable references are coverage checks, not synthetic
+training positives or playback overrides. Homicide's weak approval has weight
+0.35. Other candidates are unreviewed contrastive background.
+
+L-BFGS converges in 21 iterations: 90 parameters change, and the regularized
+objective falls from 2.591204 to 1.499529. A preceding 13-weight residual fit with
+synthetic references failed; its checkpoint/results remain in the evidence
+bundle as an ablation. The final fit also has regressions and is not promoted.
+Leave-one-update-out retains a prior already exposed to personal examples, so
+these folds test retention, not clean unseen generalization. Only Love/Closer
+retains an exact approved raw top candidate when its latest label is omitted.
+
+All entries below are **accepted automatic plans**, after clock fitting:
+
+| Pair | Round 5 cues | Expanded search + prior scorer | Expanded search + fitted scorer |
+| --- | --- | --- | --- |
+| Love / Closer | 194.66 → 68.48, 8 bars | 192.16 → 68.48, 8 bars | 192.16 → 68.48, 8 bars |
+| Homicide / Last Page | 91.82 → 43.18, 4 bars | 80.36 → 126.14, 2 bars | 91.82 → 40.30, 4 bars |
+| Yeah / Somebody | 145.32 → 3.96, 8 bars | 146.90 → 5.70, 8 bars | 145.32 → 3.96, 8 bars |
+| yes baby / Sandstorm | Declined | 144.04 → 31.28, 16 bars | 2.54 → 103.56, 2 bars |
+| Mantra / Subway | 115.12 → 32.02, 8 bars | 117.16 → 38.00, 8 bars | 100.76 → 12.00, 16 bars |
+
+Love's approved outgoing cue at 192.16 seconds is recovered by the source fix.
+The fitted scorer restores Yeah's approved choice after the expanded search
+regressed it, but moves Homicide's incoming cue and misses the other two labels.
+The exact approved yes baby and Mantra windows are still unavailable. Their
+nearest same-length candidate start errors sum to 3.58 and 2.011 seconds,
+respectively; neither is relabeled as an approved substitute.
+
+The round-5 full-span fader network is unchanged. `round6_compare.py` rerenders
+all three conditions with the same R2 renderer, no EQ and one common export gain
+per pair. All 14 previews have exact decoded frame counts, no clipped samples,
+strictly monotone in-overlap gains and exact control endpoints. These checks do
+not establish musical alignment, absence of stretch artifacts or listening
+quality. The HTML listening report includes every result, including regressions.
+
+`verify_candidates.py` compiles analysis and learned-beats separately and runs
+all common tests: **185 pass**. New regressions cover recording-edge context,
+quiet/irregular spans, weak ternary bars, independent phase support, alternative
+analysis acceptance, all-pool rejection and cancellation. Android and native
+integration suites were not run. Earlier incomplete temporary PCM decodes were
+discarded and rebuilt; all final pools use complete, hash-checked recordings.
+
+Reproduce from the separate evidence bundle and matching Git revision:
+
+```sh
+python3 tools/preference-automix/verify_candidates.py
+python3 tools/preference-automix/build_training_engine.py ROUND5/frozen
+OPENBLAS_NUM_THREADS=2 python3 tools/preference-automix/train_cues_round6.py ROUND6 ROUND5
+python3 tools/preference-automix/freeze_ensemble.py ROUND5/frozen ROUND6
+python3 tools/preference-automix/run_ensemble.py outgoing.opus incoming.opus \
+  --release ROUND6/frozen --out NEW_EMPTY_DIRECTORY --experimental-cues
+```
+
+Do not recreate an existing frozen directory. Omit `--experimental-cues` to use
+the prior scorer with the same expanded search; the entire ensemble runner is
+experimental. It verifies release, code, model and dependency hashes, accepts no
+cue/bar/offset/EQ/gain overrides, and retains the first result or decline.
+Whole-file PCM and encoded audio are atomically written and duration checked.
+The bundled native renderer is Linux x86-64 and must be executable after unzip.
+
+For fresh training-pool collection, update only the source paths in the labels
+manifest while retaining their hashes, then run `collect_ensemble.py ROUND6
+ROUND6/frozen --scope NEW_SCOPE`. The fitting script reads `expanded/pool-*`.
+Reference-window features are extracted separately for training diagnostics;
+no reference property is supplied by the automatic audition runner. Detector
+logit caching is keyed by verified model identity and exact input features.
+
+## Round 5: full-span faders and experimental cue training (historical)
 
 The latest feedback rejects abrupt outgoing cuts and fades beginning halfway
 through the overlap. `full_span_faders.py` changes the model's output from direct
