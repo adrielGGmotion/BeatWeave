@@ -250,7 +250,9 @@ internal class MusicalCueRanking(
         private val onset = prepareOnset()
         private val envelope = onset.first
         private val prefix = onset.second
-        private val meanActivity = if (envelope.isEmpty()) 0.0 else prefix.last() / envelope.size
+        private val meanActivity =
+            if (envelope.isEmpty() || !duration.isFinite() || duration <= 0.0) 0.0
+            else measuredOnset(0.0, duration).mean
 
         private fun validBlocks(values: List<EnergyBlock>): Boolean {
             for (i in values.indices) {

@@ -428,6 +428,38 @@ class AutoMixPlannerTest {
     }
 
     @Test
+    fun cueRankingExcludesOutOfRecordingOnsetsFromActivityNormalization() {
+        val measured = withBarEnergy(song(List(8) { 4 }), List(8) { -12.0 })
+        val grid = measured.barTracking!!.grid()
+        val boundary = grid.beats.at(grid.boundary(3))
+        val hop = 0.02
+        val inRecording =
+            FloatArray(ceil(measured.audio.durationSeconds / hop).toInt()) {
+                if (it * hop < boundary) 0.0f else 1.0f
+            }
+        val padding = FloatArray(inRecording.size) { 100.0f }
+
+        fun startChange(envelope: FloatArray, offset: Double): Double {
+            val audio =
+                measured.audio.copy(
+                    onsetEnvelope = envelope,
+                    onsetHopSeconds = hop,
+                    onsetTimeOffsetSeconds = offset,
+                )
+            return MusicalCueRanking(audio, audio).incoming(grid, start = 3, bars = 2).startChange
+        }
+
+        val expected = startChange(inRecording, 0.0)
+        assertTrue(expected > 0.15)
+        assertEquals(expected, startChange(inRecording + padding, 0.0), 1e-12)
+        assertEquals(
+            expected,
+            startChange(padding + inRecording, -padding.size * hop),
+            1e-12,
+        )
+    }
+
+    @Test
     fun earlyBreakDoesNotDiscardMostOfTheOutgoingSong() {
         val outgoing =
             withBarEnergy(
