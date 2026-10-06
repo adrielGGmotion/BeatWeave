@@ -276,6 +276,43 @@ class AutomaticPulseSelectionTest {
     }
 
     @Test
+    fun outOfRecordingOnsetPaddingCannotQualifyAutomaticPulseCandidate() {
+        val nearEnd = List(96) { Beat(duration - 0.03 - (95 - it) * 0.75, 0.95f) }
+        val trailingMeasured = reference(nearEnd, nearEnd.take(33))
+        val trailingPadding =
+            trailingMeasured.onsetEnvelope.copyOf(trailingMeasured.onsetEnvelope.size + 2).also {
+                it[trailingMeasured.onsetEnvelope.size] = 1.0f
+            }
+        val nearStart = List(96) { Beat(0.03 + it * 0.75, 0.95f) }
+        val leadingMeasured = reference(nearStart, nearStart.drop(1).take(33))
+        val leadingPadding = floatArrayOf(1.0f) + leadingMeasured.onsetEnvelope
+        val paddedCases =
+            listOf(
+                model(nearEnd) to trailingMeasured.copy(onsetEnvelope = trailingPadding),
+                model(nearStart) to
+                    leadingMeasured.copy(
+                        onsetEnvelope = leadingPadding,
+                        onsetTimeOffsetSeconds = -0.01,
+                    ),
+            )
+
+        for ((learned, padded) in paddedCases) {
+            val result =
+                AutomaticPulseSelector.select(
+                    learned,
+                    padded,
+                    { error("The initial pulse level is already the supported candidate") },
+                )
+
+            val candidate = result.diagnostics.candidates.single { it.bpm == 80.0 }
+            assertEquals(33.0 / 96.0, candidate.onsetAgreement, 1e-9)
+            assertNull(result.diagnostics.selectedBpm)
+            assertTrue(candidate.rejectionReasons.any { it.contains("Too few neural events") })
+            assertFalse(result.pulse.quality.safeForAutomaticMix)
+        }
+    }
+
+    @Test
     fun integerRelatedAlternativesRemainVisibleWithoutChangingTheSelectedClock() {
         val spectral =
             listOf(
