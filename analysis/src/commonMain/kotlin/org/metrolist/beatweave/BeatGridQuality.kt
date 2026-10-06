@@ -423,9 +423,9 @@ object PulseNormalizer {
                 // inserted pulses bracket them within three pulse periods on BOTH sides.
                 val before = inserts.take(index).lastOrNull { it.candidate != null }
                 val after = inserts.drop(index + 1).firstOrNull { it.candidate != null }
-                val period =
-                    measuredLocalPeriod(reference, insert.predicted) ?: Double.POSITIVE_INFINITY
+                val period = measuredLocalPeriod(reference, insert.predicted)
                 if (
+                    period != null &&
                     before != null &&
                         after != null &&
                         insert.predicted - before.predicted < period * 3.1 &&
