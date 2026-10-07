@@ -5,6 +5,20 @@ import kotlin.test.*
 
 class WarpClockRatesTest {
     @Test
+    fun quantizedScheduleAuditPreservesIdentityMetrics() {
+        val clock = BeatGrid(DoubleArray(100) { it * .5 })
+        val plan = MixPlan(clock, clock, firstBeat = 0, crossfadeBeats = 16)
+        val schedule = WarpSchedule.from(plan, 50.0)
+
+        val report = WarpQuality.assess(schedule)
+
+        assertTrue(report.accepted, report.toString())
+        assertEquals(1.0, report.minimumPlaybackSpeed)
+        assertEquals(1.0, report.maximumPlaybackSpeed)
+        assertEquals(0.0, report.maximumLogSpeedChangePerSecond)
+    }
+
+    @Test
     fun lateIdentityCueWithInverseEndpointSliverRemainsAnIdentityWarp() {
         val clock = BeatGrid(DoubleArray(500) { it * .5 })
         val plan = MixPlan(clock, clock, firstBeat = 280, secondBeat = 280, crossfadeBeats = 16)

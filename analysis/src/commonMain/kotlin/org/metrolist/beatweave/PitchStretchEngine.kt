@@ -22,6 +22,10 @@ private constructor(
     private val anchorSnapshot = anchors.toList()
     val anchors: List<WarpAnchor>
         get() = anchorSnapshot.toList()
+    internal val anchorCount: Int
+        get() = anchorSnapshot.size
+
+    internal fun anchorAt(index: Int): WarpAnchor = anchorSnapshot[index]
 
     val isTranslationOnly: Boolean =
         sourceFrames == outputFrames && anchorSnapshot.all { it.sourceFrame == it.outputFrame }
