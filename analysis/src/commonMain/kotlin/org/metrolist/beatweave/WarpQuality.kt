@@ -155,7 +155,9 @@ object WarpQuality {
         val metrics = Metrics(from, to, limits)
         var previousSpeed = Double.NaN
         var previousTime = Double.NaN
-        for ((left, right) in schedule.anchors.zipWithNext()) {
+        for (index in 1 until schedule.anchorCount) {
+            val left = schedule.anchorAt(index - 1)
+            val right = schedule.anchorAt(index)
             val speed =
                 (right.sourceFrame - left.sourceFrame).toDouble() /
                     (right.outputFrame - left.outputFrame)
