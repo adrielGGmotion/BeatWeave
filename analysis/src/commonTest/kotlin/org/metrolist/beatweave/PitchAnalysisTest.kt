@@ -181,6 +181,7 @@ class PitchAnalysisTest {
         val sourceFrames = rate
         var reads = 0
         var framesRead = 0L
+        var nextExpectedFrame = 0L
         val source = object : StereoPcm {
             override val durationSeconds = sourceFrames.toDouble() / rate
 
@@ -193,9 +194,11 @@ class PitchAnalysisTest {
                 outputSampleRate: Int,
             ): FloatArray {
                 assertEquals(rate, outputSampleRate)
+                assertEquals(nextExpectedFrame, startFrame)
                 assertTrue(startFrame >= 0L && startFrame + frames <= sourceFrames)
                 reads++
                 framesRead += frames
+                nextExpectedFrame += frames
                 return FloatArray(frames * 2)
             }
         }
@@ -214,6 +217,7 @@ class PitchAnalysisTest {
         assertEquals(101, result.frames.size)
         assertEquals(3, reads)
         assertEquals(sourceFrames.toLong(), framesRead)
+        assertEquals(sourceFrames.toLong(), nextExpectedFrame)
         assertTrue(result.frames.all { !it.isVoiced })
     }
 
