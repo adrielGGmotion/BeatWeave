@@ -333,7 +333,7 @@ object PulsePhaseAudit {
                     .sorted()
             val localPeriod = localIntervals.getOrNull(localIntervals.size / 2) ?: continue
             val period = reference[intervalIndex + 1].seconds - reference[intervalIndex].seconds
-            if (period / localPeriod <= 1.48) measured[intervalIndex] = period
+            if (period / localPeriod in 0.62..1.48) measured[intervalIndex] = period
         }
         return measured
     }
