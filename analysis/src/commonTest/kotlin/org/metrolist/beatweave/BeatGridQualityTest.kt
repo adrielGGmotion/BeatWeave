@@ -10,6 +10,48 @@ import kotlin.test.assertTrue
 
 class BeatGridQualityTest {
     @Test
+    fun retainedDownbeatsPreserveInputOrderDuplicatesAndStrictTolerance() {
+        val beats = List(16) { Beat(0.25 + it * 0.5, 1.0f) }
+        val reference =
+            Analysis(
+                durationSeconds = beats.last().seconds + 1.0,
+                bpm = 120.0,
+                tempoConfidence = 1.0,
+                beats = beats,
+                rmsDb = -12.0,
+                peakDb = -1.0,
+                spectralCentroidHz = 500.0,
+                keyEstimate = "unknown",
+                keyConfidence = 0.0,
+                energyBlocks = emptyList(),
+                onsetEnvelope = FloatArray(0),
+                onsetHopSeconds = 0.01,
+                warnings = emptyList(),
+            )
+        val downbeats =
+            listOf(
+                beats[12].seconds,
+                beats[4].seconds + 0.000999,
+                beats[4].seconds + 0.001001,
+                beats[0].seconds,
+                beats[12].seconds,
+                Double.NaN,
+            )
+
+        val result = PulseNormalizer.normalize(beats, reference, downbeats)
+
+        assertEquals(
+            listOf(
+                beats[12].seconds,
+                beats[4].seconds + 0.000999,
+                beats[0].seconds,
+                beats[12].seconds,
+            ),
+            result.downbeatSeconds,
+        )
+    }
+
+    @Test
     fun cancellationInterruptsLongNormalizationAndQualityAudit() {
         class Cancelled : RuntimeException()
 
