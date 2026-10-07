@@ -75,9 +75,10 @@ object AutomaticPulseSelector {
         cancellationCheck: () -> Unit = {},
     ): AutomaticPulseResult {
         cancellationCheck()
-        val modelPulse = robustPulse(model.beats)
+        val modelPulse = robustPulse(model.beats, cancellationCheck)
         val activations =
             FloatArray(model.logits.beat.size) {
+                if (it % 4096 == 0) cancellationCheck()
                 (1.0 / (1.0 + exp(-model.logits.beat[it].toDouble()))).toFloat()
             }
         val initialNormalized =
@@ -86,6 +87,7 @@ object AutomaticPulseSelector {
                 initialReference,
                 model.downbeatSeconds,
                 activations,
+                cancellationCheck = cancellationCheck,
             )
         val spectral =
             initialReference.tempoCandidates.filter {
@@ -109,16 +111,17 @@ object AutomaticPulseSelector {
         )
         val evaluated = ArrayList<Evaluation>()
         var extraPasses = 0
-        val initialOnsetAgreement = onsetAgreement(model.beats, initialReference)
+        val initialOnsetAgreement =
+            onsetAgreement(model.beats, initialReference, cancellationCheck)
         val proposed =
             unique.sortedByDescending { candidate ->
-                approximateAgreement(model.beats, candidate.bpm) * 0.8 +
+                approximateAgreement(model.beats, candidate.bpm, cancellationCheck) * 0.8 +
                     candidate.support / max(1e-9, bestSupport) * 0.2
             }
         for (candidate in proposed) {
             cancellationCheck()
             val reasons = ArrayList<String>()
-            val approximate = approximateAgreement(model.beats, candidate.bpm)
+            val approximate = approximateAgreement(model.beats, candidate.bpm, cancellationCheck)
             // Reject chance periodicity and merely neural-imposed tempos. This evidence
             // threshold stays independent of the later grid geometry/warp safety gates.
             if (candidate.support < 0.06 || candidate.support < bestSupport * 0.35)
@@ -184,6 +187,7 @@ object AutomaticPulseSelector {
                         reference,
                         model.downbeatSeconds,
                         activations,
+                        cancellationCheck = cancellationCheck,
                     )
             val missingReference =
                 pulse.quality.issues.firstOrNull { it.code == "MISSING_REFERENCE" }
@@ -208,7 +212,7 @@ object AutomaticPulseSelector {
                     )
                 continue
             }
-            val onsetAgreement = onsetAgreement(model.beats, reference)
+            val onsetAgreement = onsetAgreement(model.beats, reference, cancellationCheck)
             var phaseEvidence =
                 PulsePhaseAudit.assess(model.beats, reference.beats, cancellationCheck)
             if (phaseEvidence.relation == PulsePhaseRelation.REGIONAL_SUPPORT) {
@@ -216,12 +220,14 @@ object AutomaticPulseSelector {
                     phaseEvidence.supportedRanges.filter { range ->
                         cancellationCheck()
                         val local =
-                            model.beats.filter {
-                                it.seconds >= range.startSeconds && it.seconds <= range.endSeconds
+                            model.beats.filterIndexed { index, beat ->
+                                if (index % 256 == 0) cancellationCheck()
+                                beat.seconds >= range.startSeconds &&
+                                    beat.seconds <= range.endSeconds
                             }
                         local.size >= 16 &&
-                            onsetAgreement(local, reference) >= 0.50 &&
-                            localCadenceAgreement(local, reference.beats) >= 0.55
+                            onsetAgreement(local, reference, cancellationCheck) >= 0.50 &&
+                            localCadenceAgreement(local, reference.beats, cancellationCheck) >= 0.55
                     }
                 val coverage =
                     model.beats
@@ -383,26 +389,40 @@ object AutomaticPulseSelector {
         return AutomaticPulseResult(chosenReference, chosenPulse, diagnostics, regions)
     }
 
-    private fun robustPulse(beats: List<Beat>): Double? {
-        val periods =
-            beats
-                .windowed(9)
-                .map { (it.last().seconds - it.first().seconds) / 8 }
-                .filter { it > 0 && it.isFinite() }
-                .sorted()
+    private fun robustPulse(beats: List<Beat>, cancellationCheck: () -> Unit): Double? {
+        cancellationCheck()
+        val periods = ArrayList<Double>(max(0, beats.size - 8))
+        for (index in 0..beats.size - 9) {
+            if (index % 256 == 0) cancellationCheck()
+            val period = (beats[index + 8].seconds - beats[index].seconds) / 8
+            if (period > 0 && period.isFinite()) periods += period
+        }
+        periods.sort()
+        cancellationCheck()
         return periods.getOrNull(periods.size / 2)?.let { 60 / it }
     }
 
-    private fun approximateAgreement(beats: List<Beat>, bpm: Double): Double {
+    private fun approximateAgreement(
+        beats: List<Beat>,
+        bpm: Double,
+        cancellationCheck: () -> Unit,
+    ): Double {
         if (beats.size < 2) return 0.0
         val period = 60 / bpm
-        return beats
-            .zipWithNext()
-            .count { (a, b) -> abs((b.seconds - a.seconds) / period - 1) < 0.22 }
-            .toDouble() / (beats.size - 1)
+        var matches = 0
+        for (index in 0 until beats.lastIndex) {
+            if (index % 256 == 0) cancellationCheck()
+            if (abs((beats[index + 1].seconds - beats[index].seconds) / period - 1) < 0.22)
+                matches++
+        }
+        return matches.toDouble() / (beats.size - 1)
     }
 
-    private fun onsetAgreement(beats: List<Beat>, reference: Analysis): Double {
+    private fun onsetAgreement(
+        beats: List<Beat>,
+        reference: Analysis,
+        cancellationCheck: () -> Unit,
+    ): Double {
         val step = reference.onsetHopSeconds
         val offset = reference.onsetTimeOffsetSeconds
         val duration = reference.durationSeconds
@@ -434,7 +454,8 @@ object AutomaticPulseSelector {
         if (!firstMeasuredTime.isFinite() || !lastMeasuredTime.isFinite()) return 0.0
         var covered = 0
         var count = 0
-        for (beat in beats) {
+        for ((index, beat) in beats.withIndex()) {
+            if (index % 256 == 0) cancellationCheck()
             if (!beat.seconds.isFinite()) return 0.0
             if (
                 beat.seconds + tolerance < firstMeasuredTime ||
@@ -460,21 +481,27 @@ object AutomaticPulseSelector {
         return if (coverage >= 0.55) count.toDouble() / covered else 0.0
     }
 
-    private fun localCadenceAgreement(beats: List<Beat>, reference: List<Beat>): Double {
+    private fun localCadenceAgreement(
+        beats: List<Beat>,
+        reference: List<Beat>,
+        cancellationCheck: () -> Unit,
+    ): Double {
         if (beats.size < 2 || reference.size < 2) return 0.0
-        return beats
-            .zipWithNext()
-            .count { (a, b) ->
-                val index = lowerBound(reference, (a.seconds + b.seconds) / 2)
-                val periods =
-                    (max(0, index - 8) until min(reference.lastIndex, index + 8))
-                        .map { reference[it + 1].seconds - reference[it].seconds }
-                        .filter { it > 0 && it.isFinite() }
-                        .sorted()
-                val period = periods.getOrNull(periods.size / 2)
-                period != null && abs((b.seconds - a.seconds) / period - 1) < 0.22
-            }
-            .toDouble() / (beats.size - 1)
+        var matches = 0
+        for (beatIndex in 0 until beats.lastIndex) {
+            if (beatIndex % 256 == 0) cancellationCheck()
+            val a = beats[beatIndex]
+            val b = beats[beatIndex + 1]
+            val index = lowerBound(reference, (a.seconds + b.seconds) / 2)
+            val periods =
+                (max(0, index - 8) until min(reference.lastIndex, index + 8))
+                    .map { reference[it + 1].seconds - reference[it].seconds }
+                    .filter { it > 0 && it.isFinite() }
+                    .sorted()
+            val period = periods.getOrNull(periods.size / 2)
+            if (period != null && abs((b.seconds - a.seconds) / period - 1) < 0.22) matches++
+        }
+        return matches.toDouble() / (beats.size - 1)
     }
 
     private fun localPhaseUncertaintyIssues(
@@ -609,6 +636,7 @@ object PulseRegions {
                         beats.subList(start, end),
                         reference.beats,
                         reference.durationSeconds,
+                        cancellationCheck,
                     )
                 if (quality.safeForAutomaticMix)
                     accepted +=
