@@ -237,14 +237,24 @@ object AcousticPulseEvidence {
         cancellationCheck: () -> Unit = {},
     ): AcousticPulseReport {
         cancellationCheck()
-        require(
-            beats.all {
-                it.seconds.isFinite() && it.seconds >= 0.0 && it.seconds <= features.durationSeconds
-            }
-        ) {
+        var insideMeasuredDuration = true
+        var strictlyIncreasing = true
+        var previous = Double.NEGATIVE_INFINITY
+        var beatIndex = 0
+        val beatIterator = beats.iterator()
+        while (beatIterator.hasNext()) {
+            if (beatIndex > 0 && beatIndex % 256 == 0) cancellationCheck()
+            val seconds = beatIterator.next().seconds
+            if (!seconds.isFinite() || seconds < 0.0 || seconds > features.durationSeconds)
+                insideMeasuredDuration = false
+            if (beatIndex > 0 && seconds <= previous) strictlyIncreasing = false
+            previous = seconds
+            beatIndex++
+        }
+        require(insideMeasuredDuration) {
             "Beat observations must be finite and inside the measured source duration"
         }
-        require(beats.zipWithNext().all { (a, b) -> b.seconds > a.seconds }) {
+        require(strictlyIncreasing) {
             "Beat observations must be strictly increasing"
         }
         val intervalCount = (beats.size - 1).coerceAtLeast(0)

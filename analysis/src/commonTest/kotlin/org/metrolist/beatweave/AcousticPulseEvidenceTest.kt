@@ -161,6 +161,31 @@ class AcousticPulseEvidenceTest {
     }
 
     @Test
+    fun longClockValidationPollsCancellationBeforeReadingTheNextChunk() {
+        class CountingClock(override val size: Int) : AbstractList<Beat>() {
+            var accesses = 0
+
+            override fun get(index: Int): Beat {
+                accesses++
+                return Beat(index * 0.25, 1f)
+            }
+        }
+
+        val longFeatures = AcousticAttackFeatures(Array(4) { FloatArray(1) }, 14_400.0, 14_400.0)
+        val longClock = CountingClock(57_601)
+        var calls = 0
+
+        assertFailsWith<InterruptedFixture> {
+            AcousticPulseEvidence.assess(longFeatures, longClock) {
+                if (++calls == 2) throw InterruptedFixture()
+            }
+        }
+
+        assertEquals(2, calls)
+        assertEquals(256, longClock.accesses)
+    }
+
+    @Test
     fun measuredFeatureGainInvarianceAndStationaryToneRejection() {
         val sampleRate = 11025
         val beats = List(41) { Beat(0.25 + it * 0.4, 1f) }
