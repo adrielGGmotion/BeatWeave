@@ -69,6 +69,8 @@ and cannot authorize a canonical range. Regional phase windows stop at those bra
 coverage counts only measured observations.
 Automatic pulse diagnostics report that missing-reference rejection without deriving phase, onset,
 or score evidence from the malformed candidate.
+Automatic pulse selection also propagates cooperative cancellation through pulse preprocessing,
+normalization and grid-quality auditing; cancellation does not relax any timing gate.
 Clock-quality assessment also streams ordered beat sections without materializing and sorting a
 second knot list, and automatic planning polls cancellation throughout that scan.
 The 0.10.0 measurements below predate that change;
