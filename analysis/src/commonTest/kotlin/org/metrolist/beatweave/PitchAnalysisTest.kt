@@ -176,6 +176,48 @@ class PitchAnalysisTest {
     }
 
     @Test
+    fun overlappingMaximumWindowsDecodeEverySourceFrameAtMostOnce() {
+        val rate = 384000
+        val sourceFrames = rate
+        var reads = 0
+        var framesRead = 0L
+        val source = object : StereoPcm {
+            override val durationSeconds = sourceFrames.toDouble() / rate
+
+            override fun read(startSeconds: Double, frames: Int, outputSampleRate: Int) =
+                readFrames((startSeconds * outputSampleRate).roundToLong(), frames, outputSampleRate)
+
+            override fun readFrames(
+                startFrame: Long,
+                frames: Int,
+                outputSampleRate: Int,
+            ): FloatArray {
+                assertEquals(rate, outputSampleRate)
+                assertTrue(startFrame >= 0L && startFrame + frames <= sourceFrames)
+                reads++
+                framesRead += frames
+                return FloatArray(frames * 2)
+            }
+        }
+        val analyzer =
+            PitchAnalyzer(
+                PitchAnalysisOptions(
+                    minimumFrequencyHz = 20.0,
+                    maximumFrequencyHz = 2000.0,
+                    hopSeconds = 0.005,
+                    windowSeconds = 0.5,
+                ),
+            )
+
+        val result = analyzer.analyze(source, rate)
+
+        assertEquals(101, result.frames.size)
+        assertEquals(3, reads)
+        assertEquals(sourceFrames.toLong(), framesRead)
+        assertTrue(result.frames.all { !it.isVoiced })
+    }
+
+    @Test
     fun frameCountDerivedStereoDurationsMatchMonoWithoutLosingCompleteWindows() {
         val rate = 11025
         val options = PitchAnalysisOptions(windowSeconds = 889.0 / rate)
