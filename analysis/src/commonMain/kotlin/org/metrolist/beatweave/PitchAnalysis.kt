@@ -224,8 +224,10 @@ class PitchAnalyzer(private val options: PitchAnalysisOptions = PitchAnalysisOpt
                     selectedChannel = 1 - selectedChannel
                 }
             }
-            for (i in window.indices)
+            for (i in window.indices) {
+                if (i and (PITCH_CANCELLATION_OPERATIONS - 1) == 0) cancellationCheck()
                 window[i] = stereoCache[(offset + i) * 2 + selectedChannel].toDouble()
+            }
         }
     }
 
