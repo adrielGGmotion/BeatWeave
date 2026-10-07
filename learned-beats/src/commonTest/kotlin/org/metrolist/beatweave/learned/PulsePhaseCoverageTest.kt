@@ -171,7 +171,7 @@ class PulsePhaseCoverageTest {
     @Test
     fun referenceIntervalCannotSetItsOwnCadenceBaseline() {
         val beats = List(8) { Beat(.45 + it * .5, .95f) }
-        val evidence = PulsePhaseAudit.assess(beats, listOf(Beat(.2), Beat(4.7)))
+        val evidence = PulsePhaseAudit.assess(beats, listOf(Beat(.2, .95f), Beat(4.7, .95f)))
 
         assertEquals(PulsePhaseRelation.INSUFFICIENT, evidence.relation)
         assertEquals(0, evidence.observedEvents)
