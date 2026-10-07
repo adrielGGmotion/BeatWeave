@@ -15,10 +15,12 @@ internal fun robustBeatInterval(
     if (count == 0) return null
     var source = DoubleArray(count)
     var observed = 0
+    val iterator = beats.iterator()
     if (beats.size >= 9) {
         val ring = DoubleArray(9)
-        for (beat in beats) {
+        while (iterator.hasNext()) {
             if (observed % BEAT_STATISTICS_CANCELLATION_INTERVAL == 0) cancellationCheck()
+            val beat = iterator.next()
             val position = observed % ring.size
             ring[position] = beat.seconds
             if (observed >= 8)
@@ -28,8 +30,9 @@ internal fun robustBeatInterval(
         }
     } else {
         var previous: Beat? = null
-        for (beat in beats) {
+        while (iterator.hasNext()) {
             if (observed % BEAT_STATISTICS_CANCELLATION_INTERVAL == 0) cancellationCheck()
+            val beat = iterator.next()
             previous?.let { source[observed - 1] = beat.seconds - it.seconds }
             previous = beat
             observed++

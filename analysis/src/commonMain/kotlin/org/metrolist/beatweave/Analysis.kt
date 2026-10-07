@@ -66,8 +66,10 @@ class MusicAnalyzer {
         require(modelId.isNotBlank()) { "A detector identity is required" }
         val duration = pcm.size.toDouble() / sampleRate
         var index = 0
-        for (beat in observedBeats) {
+        var beatIterator = observedBeats.iterator()
+        while (beatIterator.hasNext()) {
             if (index % SOURCE_CLOCK_CANCELLATION_INTERVAL == 0) cancellationCheck()
+            val beat = beatIterator.next()
             require(
                 beat.seconds.isFinite() &&
                     beat.seconds >= 0 &&
@@ -78,8 +80,10 @@ class MusicAnalyzer {
         }
         var previousBeat: Beat? = null
         index = 0
-        for (beat in observedBeats) {
+        beatIterator = observedBeats.iterator()
+        while (beatIterator.hasNext()) {
             if (index % SOURCE_CLOCK_CANCELLATION_INTERVAL == 0) cancellationCheck()
+            val beat = beatIterator.next()
             previousBeat?.let {
                 require(beat.seconds > it.seconds) { "Beats must be strictly ordered" }
             }
@@ -87,15 +91,19 @@ class MusicAnalyzer {
             index++
         }
         index = 0
-        for (downbeat in downbeatSeconds) {
+        var downbeatIterator = downbeatSeconds.iterator()
+        while (downbeatIterator.hasNext()) {
             if (index % SOURCE_CLOCK_CANCELLATION_INTERVAL == 0) cancellationCheck()
+            val downbeat = downbeatIterator.next()
             require(downbeat.isFinite() && downbeat >= 0 && downbeat < duration)
             index++
         }
         var previousDownbeat: Double? = null
         index = 0
-        for (downbeat in downbeatSeconds) {
+        downbeatIterator = downbeatSeconds.iterator()
+        while (downbeatIterator.hasNext()) {
             if (index % SOURCE_CLOCK_CANCELLATION_INTERVAL == 0) cancellationCheck()
+            val downbeat = downbeatIterator.next()
             previousDownbeat?.let {
                 require(downbeat > it) { "Downbeats must be strictly ordered" }
             }
