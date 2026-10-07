@@ -5,6 +5,38 @@ import kotlin.test.*
 
 class WarpClockRatesTest {
     @Test
+    fun streamedCurvedScheduleRetainsOrderedMapAndDefensiveSnapshots() {
+        val first = BeatGrid(DoubleArray(48) { it * .5 })
+        var sourceTime = .2
+        val second =
+            BeatGrid(
+                DoubleArray(48) { index ->
+                    if (index > 0) sourceTime += if (index % 2 == 0) .3 else .7
+                    sourceTime
+                }
+            )
+        val plan =
+            MixPlan(first, second, firstBeat = 4, secondBeat = 4, crossfadeBeats = 16)
+
+        val schedule = WarpSchedule.from(plan, 12.0)
+        val anchors = schedule.anchors
+
+        assertTrue(anchors.size > 48, "Fixture must exercise curved-clock subdivision")
+        for ((left, right) in anchors.zipWithNext()) {
+            assertTrue(right.sourceFrame > left.sourceFrame)
+            assertTrue(right.outputFrame > left.outputFrame)
+            val source = (left.sourceFrame + right.sourceFrame) / 2.0 / schedule.sampleRate
+            val mapped =
+                (schedule.outputOriginFrame + (left.outputFrame + right.outputFrame) / 2.0) /
+                    schedule.sampleRate
+            assertEquals(plan.secondOutputTime(source), mapped, .0011)
+        }
+        @Suppress("UNCHECKED_CAST")
+        (schedule.anchors as MutableList<WarpAnchor>).clear()
+        assertEquals(anchors, schedule.anchors)
+    }
+
+    @Test
     fun quantizedScheduleAuditPreservesIdentityMetrics() {
         val clock = BeatGrid(DoubleArray(100) { it * .5 })
         val plan = MixPlan(clock, clock, firstBeat = 0, crossfadeBeats = 16)
