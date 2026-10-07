@@ -134,9 +134,20 @@ object PulsePhaseAudit {
         )
             return insufficient
 
-        data class Observation(val seconds: Double, val phase: Double, val tolerance: Double)
+        data class Observation(
+            val seconds: Double,
+            val phase: Double,
+            val tolerance: Double,
+            val referenceSegment: Int,
+        )
         val phases = ArrayList<Observation>()
         val referencePeriods = measuredReferencePeriods(reference, cancellationCheck)
+        val referenceSegments = IntArray(referencePeriods.size)
+        var referenceSegment = 0
+        for (index in referencePeriods.indices) {
+            referenceSegments[index] = referenceSegment
+            if (!referencePeriods[index].isFinite()) referenceSegment++
+        }
         var directlyAligned = 0
         for ((eventIndex, beat) in observed.withIndex()) {
             if (eventIndex % 32 == 0) cancellationCheck()
@@ -153,7 +164,7 @@ object PulsePhaseAudit {
             val phase = (beat.seconds - left) / period
             val tolerance = min(0.16, 0.075 / period)
             if (circularDistance(phase, 0.0) <= tolerance) directlyAligned++
-            phases += Observation(beat.seconds, phase, tolerance)
+            phases += Observation(beat.seconds, phase, tolerance, referenceSegments[next - 1])
         }
         val direct = directlyAligned.toDouble() / observed.size
         val coverage = phases.size.toDouble() / observed.size
@@ -217,12 +228,19 @@ object PulsePhaseAudit {
                 stable >= 0.80 &&
                 halfDrift(0, phases.size) <= tolerance(0, phases.size) * 0.5
 
-        data class Window(var start: Int, var end: Int, var center: Double)
+        data class Window(
+            var start: Int,
+            var end: Int,
+            var center: Double,
+            val referenceSegment: Int,
+        )
         val merged = ArrayList<Window>()
         if (!globalStable && phases.size >= 16) {
             for (start in 0..phases.size - 16) {
                 if (start % 32 == 0) cancellationCheck()
                 val end = start + 16
+                val segment = phases[start].referenceSegment
+                if ((start until end).any { phases[it].referenceSegment != segment }) continue
                 val (center, concentration) = statistics(start, end)
                 val tolerance = tolerance(start, end)
                 if (
@@ -235,12 +253,13 @@ object PulsePhaseAudit {
                 if (
                     previous != null &&
                         previous.end >= start &&
+                        previous.referenceSegment == segment &&
                         circularDistance(previous.center, center) <= tolerance
                 ) {
                     previous.end = end
                     // Compare neighbouring windows during merging; audit the complete union below.
                     previous.center = center
-                } else merged += Window(start, end, center)
+                } else merged += Window(start, end, center, segment)
             }
         }
         val ranges =
@@ -265,9 +284,11 @@ object PulsePhaseAudit {
                     )
             }
         val regionalCoverage =
-            observed
-                .count { beat ->
-                    ranges.any { beat.seconds >= it.startSeconds && beat.seconds <= it.endSeconds }
+            phases
+                .count { phase ->
+                    ranges.any {
+                        phase.seconds >= it.startSeconds && phase.seconds <= it.endSeconds
+                    }
                 }
                 .toDouble() / observed.size
         val relation =
@@ -306,6 +327,7 @@ object PulsePhaseAudit {
             val hi = min(reference.lastIndex, centre + 8)
             val localIntervals =
                 (lo until hi)
+                    .filter { it != intervalIndex }
                     .map { reference[it + 1].seconds - reference[it].seconds }
                     .filter { it > 0 && it.isFinite() }
                     .sorted()
