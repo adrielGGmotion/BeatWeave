@@ -2,12 +2,52 @@ package org.metrolist.beatweave
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class BeatGridQualityTest {
+    @Test
+    fun cancellationInterruptsLongNormalizationAndQualityAudit() {
+        class Cancelled : RuntimeException()
+
+        val beats = List(50_000) { Beat(0.25 + it * 0.5, 1.0f) }
+        val reference =
+            Analysis(
+                durationSeconds = beats.last().seconds + 1.0,
+                bpm = 120.0,
+                tempoConfidence = 1.0,
+                beats = beats,
+                rmsDb = -12.0,
+                peakDb = -1.0,
+                spectralCentroidHz = 500.0,
+                keyEstimate = "unknown",
+                keyConfidence = 0.0,
+                energyBlocks = emptyList(),
+                onsetEnvelope = FloatArray(0),
+                onsetHopSeconds = 0.01,
+                warnings = emptyList(),
+            )
+
+        var normalizationChecks = 0
+        assertFailsWith<Cancelled> {
+            PulseNormalizer.normalize(beats, reference) {
+                if (++normalizationChecks == 3) throw Cancelled()
+            }
+        }
+        assertEquals(3, normalizationChecks)
+
+        var auditChecks = 0
+        assertFailsWith<Cancelled> {
+            BeatGridQuality.audit(beats, beats, reference.durationSeconds) {
+                if (++auditChecks == 3) throw Cancelled()
+            }
+        }
+        assertEquals(3, auditChecks)
+    }
+
     @Test
     fun eachMultiPulseInsertionRequiresMeasuredReferenceCadence() {
         val completeModel = List(17) { Beat(0.26 + it * 0.5, 1.0f) }
