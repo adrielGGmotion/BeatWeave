@@ -580,10 +580,8 @@ object PulseNormalizer {
                 )
         val retainedDownbeats =
             downbeatSeconds.filter { time ->
-                output.any {
-                    checkCancellationPeriodically()
-                    abs(it.seconds - time) < 0.001
-                }
+                checkCancellationPeriodically()
+                containsBeatNear(output, time, 0.001)
             }
         return result(
             rawBeats,
@@ -650,6 +648,12 @@ object PulseNormalizer {
             if (beats[mid].seconds < at) lo = mid + 1 else hi = mid
         }
         return lo
+    }
+
+    private fun containsBeatNear(beats: List<Beat>, at: Double, tolerance: Double): Boolean {
+        val next = lowerBound(beats, at)
+        return (next < beats.size && abs(beats[next].seconds - at) < tolerance) ||
+            (next > 0 && abs(beats[next - 1].seconds - at) < tolerance)
     }
 
     private fun audioCandidate(analysis: Analysis, expected: Double, tolerance: Double): Beat? {
