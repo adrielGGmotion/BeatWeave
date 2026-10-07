@@ -382,9 +382,10 @@ object PulsePhaseAudit {
     ): Boolean {
         var previous = Double.NEGATIVE_INFINITY
         var index = 0
-        for (beat in reference) {
+        val iterator = reference.iterator()
+        while (iterator.hasNext()) {
             if (index > 0 && index % 256 == 0) cancellationCheck()
-            val seconds = beat.seconds
+            val seconds = iterator.next().seconds
             if (!seconds.isFinite() || seconds <= previous) return false
             previous = seconds
             index++
