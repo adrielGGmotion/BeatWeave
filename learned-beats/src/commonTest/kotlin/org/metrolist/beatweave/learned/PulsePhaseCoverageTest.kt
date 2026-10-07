@@ -179,6 +179,22 @@ class PulsePhaseCoverageTest {
     }
 
     @Test
+    fun duplicateReferenceBracketCannotProvidePhaseCoverageOrLocalSupport() {
+        val beats = observed.toMutableList().also { it[100] = it[100].copy(seconds = 50.25) }
+        val duplicateReference = reference.toMutableList().also { it.add(101, Beat(50.25, .95f)) }
+
+        val evidence = PulsePhaseAudit.assess(beats, duplicateReference)
+        val supported = PulsePhaseAudit.locallySupported(beats, duplicateReference, evidence)
+
+        assertEquals(PulsePhaseRelation.DIRECT_ALIGNMENT, evidence.relation)
+        assertEquals(239, evidence.observedEvents)
+        assertEquals(239.0 / beats.size, evidence.coverage, 1e-12)
+        assertFalse(supported[100])
+        assertTrue(supported[99])
+        assertTrue(supported[101])
+    }
+
+    @Test
     fun constantAlignedClockRetainsWholeTrackSupportAndOriginalTimestamps() {
         val (result, song) = select(observed)
         assertTrue(result.pulse.quality.safeForAutomaticMix)
