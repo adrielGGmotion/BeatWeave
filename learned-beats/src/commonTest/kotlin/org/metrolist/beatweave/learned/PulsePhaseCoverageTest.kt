@@ -286,4 +286,29 @@ class PulsePhaseCoverageTest {
         }
         assertEquals(451, checks)
     }
+
+    @Test
+    fun longReferenceValidationPollsCancellationBeforeScanningTheWholeClock() {
+        class CountingReference(override val size: Int) : AbstractList<Beat>() {
+            var accesses = 0
+
+            override fun get(index: Int): Beat {
+                accesses++
+                return Beat(.2 + index * .5, .95f)
+            }
+        }
+
+        class Stop : RuntimeException()
+        val longReference = CountingReference(57_601)
+        var checks = 0
+
+        assertFailsWith<Stop> {
+            PulsePhaseAudit.assess(observed, longReference) {
+                if (++checks == 2) throw Stop()
+            }
+        }
+
+        assertEquals(2, checks)
+        assertTrue(longReference.accesses <= 256)
+    }
 }
