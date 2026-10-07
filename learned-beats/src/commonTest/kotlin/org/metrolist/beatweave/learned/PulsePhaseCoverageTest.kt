@@ -150,6 +150,35 @@ class PulsePhaseCoverageTest {
     }
 
     @Test
+    fun referenceHoleCannotCreateRegionalPhaseSupport() {
+        val beats = shifted(0, observed.lastIndex, .25)
+        val sparseReference = reference.filterIndexed { index, _ -> index !in 60..179 }
+
+        val evidence = PulsePhaseAudit.assess(beats, sparseReference)
+
+        assertEquals(PulsePhaseRelation.INCOHERENT, evidence.relation)
+        assertEquals(119, evidence.observedEvents)
+        assertEquals(119.0 / beats.size, evidence.coverage, 1e-12)
+        assertEquals(119.0 / beats.size, evidence.regionalCoverage, 1e-12)
+        assertEquals(2, evidence.supportedRanges.size)
+        assertTrue(
+            evidence.supportedRanges.none {
+                it.startSeconds < beats[59].seconds && it.endSeconds > beats[180].seconds
+            }
+        )
+    }
+
+    @Test
+    fun referenceIntervalCannotSetItsOwnCadenceBaseline() {
+        val beats = List(8) { Beat(.45 + it * .5, .95f) }
+        val evidence = PulsePhaseAudit.assess(beats, listOf(Beat(.2), Beat(4.7)))
+
+        assertEquals(PulsePhaseRelation.INSUFFICIENT, evidence.relation)
+        assertEquals(0, evidence.observedEvents)
+        assertEquals(0.0, evidence.coverage)
+    }
+
+    @Test
     fun constantAlignedClockRetainsWholeTrackSupportAndOriginalTimestamps() {
         val (result, song) = select(observed)
         assertTrue(result.pulse.quality.safeForAutomaticMix)
