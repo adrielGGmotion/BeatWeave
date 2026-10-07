@@ -151,6 +151,9 @@ accuracy, and rejection does not establish that a transition would sound bad.
   not a calibrated accuracy probability, and octave errors remain possible.
   Stereo analysis uses one-decibel channel-selection hysteresis to avoid note
   flicker from negligible balance changes; it does not separate stereo sources.
+  Cancellation is polled throughout maximum-size window and FFT passes, with no
+  analyzer-owned linear loop or transform section exceeding 32,768 iterations
+  or butterflies between polls.
 - Nonzero pitch shifting uses offline Rubber Band R3 with linked stereo and
   optional formant preservation. It is not lossless and can introduce artifacts,
   especially at large shifts. Synthetic tone and stereo regressions do not

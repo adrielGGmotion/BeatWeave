@@ -93,7 +93,10 @@ class PitchAnalyzer(private val options: PitchAnalysisOptions = PitchAnalysisOpt
         }
         return analyzeWindows(layout, sampleRate, pcm.size.toDouble() / sampleRate, cancellationCheck) {
             start, window ->
-            for (i in window.indices) window[i] = pcm[(start + i).toInt()].toDouble()
+            for (i in window.indices) {
+                if (i and (PITCH_CANCELLATION_OPERATIONS - 1) == 0) cancellationCheck()
+                window[i] = pcm[(start + i).toInt()].toDouble()
+            }
         }
     }
 
@@ -153,11 +156,19 @@ class PitchAnalyzer(private val options: PitchAnalysisOptions = PitchAnalysisOpt
                     }
                 if (retainedFrames > 0) {
                     val retainedOffset = ((start - cacheStart) * 2L).toInt()
-                    stereoCache.copyInto(
-                        destination = stereoCache,
-                        startIndex = retainedOffset,
-                        endIndex = retainedOffset + retainedFrames * 2,
-                    )
+                    val retainedSamples = retainedFrames * 2
+                    var copied = 0
+                    while (copied < retainedSamples) {
+                        cancellationCheck()
+                        val chunkEnd = min(retainedSamples, copied + PITCH_CANCELLATION_OPERATIONS)
+                        stereoCache.copyInto(
+                            destination = stereoCache,
+                            destinationOffset = copied,
+                            startIndex = retainedOffset + copied,
+                            endIndex = retainedOffset + chunkEnd,
+                        )
+                        copied = chunkEnd
+                    }
                 }
                 cacheStart = start
                 cacheFrames = min(sampleCount - start, cacheCapacity.toLong()).toInt()
@@ -167,7 +178,18 @@ class PitchAnalyzer(private val options: PitchAnalysisOptions = PitchAnalysisOpt
                 require(decoded.size == missingFrames * 2) {
                     "Stereo source returned an incorrect frame count"
                 }
-                decoded.copyInto(stereoCache, destinationOffset = retainedFrames * 2)
+                var copied = 0
+                while (copied < decoded.size) {
+                    cancellationCheck()
+                    val chunkEnd = min(decoded.size, copied + PITCH_CANCELLATION_OPERATIONS)
+                    decoded.copyInto(
+                        destination = stereoCache,
+                        destinationOffset = retainedFrames * 2 + copied,
+                        startIndex = copied,
+                        endIndex = chunkEnd,
+                    )
+                    copied = chunkEnd
+                }
             }
             val offset = (start - cacheStart).toInt()
             var leftMean = 0.0
@@ -245,11 +267,20 @@ class PitchAnalyzer(private val options: PitchAnalysisOptions = PitchAnalysisOpt
             cancellationCheck()
             val start = frame.toLong() * layout.hop
             readWindow(start, samples)
-            val mean = samples.average()
-            var totalPower = 0.0
-            real.fill(0.0)
-            imaginary.fill(0.0)
+            var mean = 0.0
             for (i in samples.indices) {
+                if (i and (PITCH_CANCELLATION_OPERATIONS - 1) == 0) cancellationCheck()
+                mean += samples[i]
+            }
+            mean /= samples.size
+            var totalPower = 0.0
+            for (i in real.indices) {
+                if (i and (PITCH_CANCELLATION_OPERATIONS - 1) == 0) cancellationCheck()
+                real[i] = 0.0
+                imaginary[i] = 0.0
+            }
+            for (i in samples.indices) {
+                if (i and (PITCH_CANCELLATION_OPERATIONS - 1) == 0) cancellationCheck()
                 // Removing DC keeps microphone offsets from being reported as voiced silence.
                 val sample = samples[i] - mean
                 real[i] = sample
@@ -262,6 +293,7 @@ class PitchAnalyzer(private val options: PitchAnalysisOptions = PitchAnalysisOpt
             if (rmsDb > options.silenceThresholdDb) {
                 pitchFft(real, imaginary, inverse = false, cancellationCheck)
                 for (i in real.indices) {
+                    if (i and (PITCH_CANCELLATION_OPERATIONS - 1) == 0) cancellationCheck()
                     real[i] = real[i] * real[i] + imaginary[i] * imaginary[i]
                     imaginary[i] = 0.0
                 }
@@ -340,7 +372,13 @@ class PitchAnalyzer(private val options: PitchAnalysisOptions = PitchAnalysisOpt
                 )
         }
         cancellationCheck()
-        return PitchAnalysis(duration, frames.toList(), layout.hop.toDouble() / sampleRate, layout.window.toDouble() / sampleRate)
+        val frameSnapshot = ArrayList<PitchFrame>(frames.size)
+        for (i in frames.indices) {
+            if (i and (PITCH_CANCELLATION_OPERATIONS - 1) == 0) cancellationCheck()
+            frameSnapshot += frames[i]
+        }
+        cancellationCheck()
+        return PitchAnalysis(duration, frameSnapshot, layout.hop.toDouble() / sampleRate, layout.window.toDouble() / sampleRate)
     }
 
     private data class Layout(val window: Int, val hop: Int, val maximumLag: Int, val frames: Int)
@@ -348,7 +386,7 @@ class PitchAnalyzer(private val options: PitchAnalysisOptions = PitchAnalysisOpt
 
 private const val MAX_PITCH_DURATION_SECONDS = 4.0 * 60.0 * 60.0
 private const val MAX_PITCH_WINDOW_FRAMES = 262144
-private const val PITCH_FFT_CANCELLATION_BUTTERFLIES = 32768
+private const val PITCH_CANCELLATION_OPERATIONS = 32768
 private val STEREO_CHANNEL_SWITCH_POWER_RATIO = 10.0.pow(1.0 / 10.0)
 private val PITCH_NOTE_NAMES = arrayOf("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
 
@@ -363,6 +401,7 @@ private fun pitchFft(
     cancellationCheck()
     var j = 0
     for (i in 1 until size) {
+        if (i and (PITCH_CANCELLATION_OPERATIONS - 1) == 0) cancellationCheck()
         var bit = size shr 1
         while (j and bit != 0) {
             j = j xor bit
@@ -384,32 +423,39 @@ private fun pitchFft(
         val angle = (if (inverse) 2.0 else -2.0) * PI / length
         val stepReal = cos(angle)
         val stepImaginary = sin(angle)
-        // Keep callback overhead bounded while ensuring a maximum-size transform cannot become
-        // one uninterruptible operation. Both values are powers of two, so the mask replaces a
-        // modulo in this hot loop.
-        val cancellationStride = max(length, PITCH_FFT_CANCELLATION_BUTTERFLIES * 2)
+        var butterfliesUntilCancellation = 0
         for (base in 0 until size step length) {
-            if (base and (cancellationStride - 1) == 0) cancellationCheck()
             var twiddleReal = 1.0
             var twiddleImaginary = 0.0
-            for (offset in 0 until length / 2) {
-                val a = base + offset
-                val b = a + length / 2
-                val re = real[b] * twiddleReal - imaginary[b] * twiddleImaginary
-                val im = real[b] * twiddleImaginary + imaginary[b] * twiddleReal
-                real[b] = real[a] - re
-                imaginary[b] = imaginary[a] - im
-                real[a] += re
-                imaginary[a] += im
-                val nextReal = twiddleReal * stepReal - twiddleImaginary * stepImaginary
-                twiddleImaginary = twiddleReal * stepImaginary + twiddleImaginary * stepReal
-                twiddleReal = nextReal
+            var offset = 0
+            while (offset < length / 2) {
+                if (butterfliesUntilCancellation == 0) {
+                    cancellationCheck()
+                    butterfliesUntilCancellation = PITCH_CANCELLATION_OPERATIONS
+                }
+                val chunkEnd = min(length / 2, offset + butterfliesUntilCancellation)
+                while (offset < chunkEnd) {
+                    val a = base + offset
+                    val b = a + length / 2
+                    val re = real[b] * twiddleReal - imaginary[b] * twiddleImaginary
+                    val im = real[b] * twiddleImaginary + imaginary[b] * twiddleReal
+                    real[b] = real[a] - re
+                    imaginary[b] = imaginary[a] - im
+                    real[a] += re
+                    imaginary[a] += im
+                    val nextReal = twiddleReal * stepReal - twiddleImaginary * stepImaginary
+                    twiddleImaginary = twiddleReal * stepImaginary + twiddleImaginary * stepReal
+                    twiddleReal = nextReal
+                    offset++
+                    butterfliesUntilCancellation--
+                }
             }
         }
         length *= 2
     }
     if (inverse) {
         for (i in real.indices) {
+            if (i and (PITCH_CANCELLATION_OPERATIONS - 1) == 0) cancellationCheck()
             real[i] /= size
             imaginary[i] /= size
         }
