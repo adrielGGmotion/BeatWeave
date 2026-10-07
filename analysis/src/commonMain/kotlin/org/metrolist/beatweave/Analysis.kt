@@ -65,32 +65,42 @@ class MusicAnalyzer {
     ): Analysis {
         require(modelId.isNotBlank()) { "A detector identity is required" }
         val duration = pcm.size.toDouble() / sampleRate
-        for (index in observedBeats.indices) {
+        var index = 0
+        for (beat in observedBeats) {
             if (index % SOURCE_CLOCK_CANCELLATION_INTERVAL == 0) cancellationCheck()
-            val beat = observedBeats[index]
             require(
                 beat.seconds.isFinite() &&
                     beat.seconds >= 0 &&
                     beat.seconds < duration &&
                     beat.strength.isFinite()
             )
+            index++
         }
-        for (index in 1 until observedBeats.size) {
+        var previousBeat: Beat? = null
+        index = 0
+        for (beat in observedBeats) {
             if (index % SOURCE_CLOCK_CANCELLATION_INTERVAL == 0) cancellationCheck()
-            require(observedBeats[index].seconds > observedBeats[index - 1].seconds) {
-                "Beats must be strictly ordered"
+            previousBeat?.let {
+                require(beat.seconds > it.seconds) { "Beats must be strictly ordered" }
             }
+            previousBeat = beat
+            index++
         }
-        for (index in downbeatSeconds.indices) {
+        index = 0
+        for (downbeat in downbeatSeconds) {
             if (index % SOURCE_CLOCK_CANCELLATION_INTERVAL == 0) cancellationCheck()
-            val downbeat = downbeatSeconds[index]
             require(downbeat.isFinite() && downbeat >= 0 && downbeat < duration)
+            index++
         }
-        for (index in 1 until downbeatSeconds.size) {
+        var previousDownbeat: Double? = null
+        index = 0
+        for (downbeat in downbeatSeconds) {
             if (index % SOURCE_CLOCK_CANCELLATION_INTERVAL == 0) cancellationCheck()
-            require(downbeatSeconds[index] > downbeatSeconds[index - 1]) {
-                "Downbeats must be strictly ordered"
+            previousDownbeat?.let {
+                require(downbeat > it) { "Downbeats must be strictly ordered" }
             }
+            previousDownbeat = downbeat
+            index++
         }
         return prepare(pcm, sampleRate, cancellationCheck)
             .withObservedBeats(observedBeats, downbeatSeconds, modelId, cancellationCheck)

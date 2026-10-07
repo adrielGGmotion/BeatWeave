@@ -14,12 +14,26 @@ internal fun robustBeatInterval(
     val count = if (beats.size >= 9) beats.size - 8 else (beats.size - 1).coerceAtLeast(0)
     if (count == 0) return null
     var source = DoubleArray(count)
-    for (index in 0 until count) {
-        if (index % BEAT_STATISTICS_CANCELLATION_INTERVAL == 0) cancellationCheck()
-        source[index] =
-            if (beats.size >= 9)
-                (beats[index + 8].seconds - beats[index].seconds) / 8
-            else beats[index + 1].seconds - beats[index].seconds
+    var observed = 0
+    if (beats.size >= 9) {
+        val ring = DoubleArray(9)
+        for (beat in beats) {
+            if (observed % BEAT_STATISTICS_CANCELLATION_INTERVAL == 0) cancellationCheck()
+            val position = observed % ring.size
+            ring[position] = beat.seconds
+            if (observed >= 8)
+                source[observed - 8] =
+                    (beat.seconds - ring[(position + 1) % ring.size]) / 8
+            observed++
+        }
+    } else {
+        var previous: Beat? = null
+        for (beat in beats) {
+            if (observed % BEAT_STATISTICS_CANCELLATION_INTERVAL == 0) cancellationCheck()
+            previous?.let { source[observed - 1] = beat.seconds - it.seconds }
+            previous = beat
+            observed++
+        }
     }
 
     cancellationCheck()
