@@ -65,20 +65,32 @@ class MusicAnalyzer {
     ): Analysis {
         require(modelId.isNotBlank()) { "A detector identity is required" }
         val duration = pcm.size.toDouble() / sampleRate
-        require(
-            observedBeats.all {
-                it.seconds.isFinite() &&
-                    it.seconds >= 0 &&
-                    it.seconds < duration &&
-                    it.strength.isFinite()
-            }
-        )
-        require(observedBeats.zipWithNext().all { (a, b) -> b.seconds > a.seconds }) {
-            "Beats must be strictly ordered"
+        for (index in observedBeats.indices) {
+            if (index % SOURCE_CLOCK_CANCELLATION_INTERVAL == 0) cancellationCheck()
+            val beat = observedBeats[index]
+            require(
+                beat.seconds.isFinite() &&
+                    beat.seconds >= 0 &&
+                    beat.seconds < duration &&
+                    beat.strength.isFinite()
+            )
         }
-        require(downbeatSeconds.all { it.isFinite() && it >= 0 && it < duration })
-        require(downbeatSeconds.zipWithNext().all { (a, b) -> b > a }) {
-            "Downbeats must be strictly ordered"
+        for (index in 1 until observedBeats.size) {
+            if (index % SOURCE_CLOCK_CANCELLATION_INTERVAL == 0) cancellationCheck()
+            require(observedBeats[index].seconds > observedBeats[index - 1].seconds) {
+                "Beats must be strictly ordered"
+            }
+        }
+        for (index in downbeatSeconds.indices) {
+            if (index % SOURCE_CLOCK_CANCELLATION_INTERVAL == 0) cancellationCheck()
+            val downbeat = downbeatSeconds[index]
+            require(downbeat.isFinite() && downbeat >= 0 && downbeat < duration)
+        }
+        for (index in 1 until downbeatSeconds.size) {
+            if (index % SOURCE_CLOCK_CANCELLATION_INTERVAL == 0) cancellationCheck()
+            require(downbeatSeconds[index] > downbeatSeconds[index - 1]) {
+                "Downbeats must be strictly ordered"
+            }
         }
         return prepare(pcm, sampleRate, cancellationCheck)
             .withObservedBeats(observedBeats, downbeatSeconds, modelId, cancellationCheck)
@@ -399,4 +411,5 @@ internal fun analysisFft(
 private const val KEY_FINE_BINS_PER_SEMITONE = 12
 private const val MINIMUM_KEY_TUNING_CONCENTRATION = 0.10
 private const val PCM_CANCELLATION_INTERVAL = 65536
+private const val SOURCE_CLOCK_CANCELLATION_INTERVAL = 256
 private const val ANALYSIS_FFT_CANCELLATION_OPERATIONS = 32768
