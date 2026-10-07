@@ -111,7 +111,7 @@ private constructor(
                 checkCancellationPeriodically()
                 val out = plan.first.at(beat)
                 if (out > origin && out < end) {
-                    val src = plan.secondSourceTime(out)
+                    val src = plan.secondSourceTimeAtFirstBeat(beat)
                     if (src > 0.0 && src < sourceEnd) candidates += Pair(src, out)
                 }
             }
