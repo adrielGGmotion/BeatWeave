@@ -328,6 +328,7 @@ object BarTracker {
             meters.flatMap { meter -> (0 until meter).map { phase -> State(meter, phase) } }
         val stateCount = states.size
         val first = meters.associateWith { meter -> states.indexOfFirst { it.meter == meter } }
+        val downbeatStates = IntArray(meters.size) { first.getValue(meters[it]) }
         val incoming = Array(stateCount) { ArrayList<Edge>() }
         val outgoing = Array(stateCount) { ArrayList<Edge>() }
         fun edge(from: Int, to: Int, probability: Double) {
@@ -417,11 +418,10 @@ object BarTracker {
             if (beat % 256 == 0) cancellationCheck()
             statePosterior[beat] =
                 exp(alpha[beat][path[beat]] + beta[path[beat]] - evidence).coerceIn(0.0, 1.0)
-            downbeatPosterior[beat] =
-                states.indices
-                    .filter { states[it].phase == 0 }
-                    .sumOf { exp(alpha[beat][it] + beta[it] - evidence) }
-                    .coerceIn(0.0, 1.0)
+            var downbeatProbability = 0.0
+            for (state in downbeatStates)
+                downbeatProbability += exp(alpha[beat][state] + beta[state] - evidence)
+            downbeatPosterior[beat] = downbeatProbability.coerceIn(0.0, 1.0)
             if (beat > 0) {
                 val previous =
                     DoubleArray(stateCount) { state ->
