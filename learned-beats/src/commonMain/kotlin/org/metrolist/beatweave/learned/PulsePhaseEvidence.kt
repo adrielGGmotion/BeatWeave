@@ -169,6 +169,9 @@ object PulsePhaseAudit {
         val direct = directlyAligned.toDouble() / observed.size
         val coverage = phases.size.toDouble() / observed.size
         if (phases.isEmpty()) return insufficient.copy(directAgreement = direct)
+        // Window medians are evaluated for every possible regional start. Reuse primitive work
+        // storage so those short sorts do not create a list plus boxed Doubles per window.
+        val toleranceWork = DoubleArray(phases.size)
         fun statistics(from: Int, until: Int): Pair<Double, Double> {
             var x = 0.0
             var y = 0.0
@@ -178,8 +181,12 @@ object PulsePhaseAudit {
             }
             return atan2(y, x) / (2 * PI) to hypot(x, y) / (until - from)
         }
-        fun tolerance(from: Int, until: Int): Double =
-            phases.subList(from, until).map { it.tolerance }.sorted().let { it[it.size / 2] }
+        fun tolerance(from: Int, until: Int): Double {
+            val size = until - from
+            for (index in 0 until size) toleranceWork[index] = phases[from + index].tolerance
+            toleranceWork.sort(0, size)
+            return toleranceWork[size / 2]
+        }
         fun inlierFraction(from: Int, until: Int, center: Double): Double =
             (from until until)
                 .count { circularDistance(phases[it].phase, center) <= phases[it].tolerance }
@@ -350,18 +357,23 @@ object PulsePhaseAudit {
         cancellationCheck: () -> Unit,
     ): DoubleArray {
         val measured = DoubleArray(reference.size - 1) { Double.NaN }
+        // The local cadence window contains at most 16 intervals. Reusing one primitive buffer
+        // avoids allocating filtered, mapped and sorted collections for every reference interval.
+        val localIntervals = DoubleArray(16)
         for (intervalIndex in measured.indices) {
             if (intervalIndex % 32 == 0) cancellationCheck()
             val centre = intervalIndex + 1
             val lo = max(0, centre - 8)
             val hi = min(reference.lastIndex, centre + 8)
-            val localIntervals =
-                (lo until hi)
-                    .filter { it != intervalIndex }
-                    .map { reference[it + 1].seconds - reference[it].seconds }
-                    .filter { it > 0 && it.isFinite() }
-                    .sorted()
-            val localPeriod = localIntervals.getOrNull(localIntervals.size / 2) ?: continue
+            var localCount = 0
+            for (index in lo until hi) {
+                if (index == intervalIndex) continue
+                val interval = reference[index + 1].seconds - reference[index].seconds
+                if (interval > 0 && interval.isFinite()) localIntervals[localCount++] = interval
+            }
+            if (localCount == 0) continue
+            localIntervals.sort(0, localCount)
+            val localPeriod = localIntervals[localCount / 2]
             val period = reference[intervalIndex + 1].seconds - reference[intervalIndex].seconds
             if (period / localPeriod in 0.62..1.48) measured[intervalIndex] = period
         }
