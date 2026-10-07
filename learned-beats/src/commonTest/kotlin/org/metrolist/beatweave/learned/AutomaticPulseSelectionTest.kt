@@ -642,6 +642,24 @@ class AutomaticPulseSelectionTest {
     }
 
     @Test
+    fun cancellationReachesPulsePreprocessingBeforeCandidateEvaluation() {
+        class Cancelled : RuntimeException()
+        var checks = 0
+
+        assertFailsWith<Cancelled> {
+            AutomaticPulseSelector.select(
+                model(slow),
+                reference(slow).copy(tempoCandidates = emptyList()),
+                { error("No candidate analysis should start") },
+            ) {
+                if (++checks == 3) throw Cancelled()
+            }
+        }
+
+        assertEquals(3, checks)
+    }
+
+    @Test
     fun SplitMetricalEvidenceIsExplicitlyAmbiguous() {
         val split = slow.take(48) + List(48) { Beat(slow[47].seconds + (it + 1) * .375, .95f) }
         val result =
