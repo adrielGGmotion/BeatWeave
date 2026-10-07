@@ -30,12 +30,15 @@ private constructor(
         require(sourceFrames > 0 && outputFrames > 0)
         require(anchorSnapshot.first() == WarpAnchor(0, 0))
         require(anchorSnapshot.last() == WarpAnchor(sourceFrames, outputFrames))
-        require(
-            anchorSnapshot.zipWithNext().all { (a, b) ->
-                b.sourceFrame > a.sourceFrame && b.outputFrame > a.outputFrame
+        for (index in 1 until anchorSnapshot.size) {
+            val previous = anchorSnapshot[index - 1]
+            val current = anchorSnapshot[index]
+            require(
+                current.sourceFrame > previous.sourceFrame &&
+                    current.outputFrame > previous.outputFrame
+            ) {
+                "Warp anchors must advance on both clocks"
             }
-        ) {
-            "Warp anchors must advance on both clocks"
         }
     }
 
