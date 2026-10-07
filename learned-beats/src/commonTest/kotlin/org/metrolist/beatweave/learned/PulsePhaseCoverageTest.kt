@@ -134,6 +134,51 @@ class PulsePhaseCoverageTest {
     }
 
     @Test
+    fun missingReferenceIntervalCannotProvidePhaseCoverageOrLocalSupport() {
+        val beats = shifted(0, observed.lastIndex, .25)
+        val sparseReference = reference.filterIndexed { index, _ -> index !in 100..107 }
+
+        val evidence = PulsePhaseAudit.assess(beats, sparseReference)
+        val supported = PulsePhaseAudit.locallySupported(beats, sparseReference, evidence)
+
+        assertEquals(PulsePhaseRelation.STABLE_OFFSET, evidence.relation)
+        assertEquals(231, evidence.observedEvents)
+        assertEquals(231.0 / beats.size, evidence.coverage, 1e-12)
+        assertTrue((99..107).none { supported[it] })
+        assertTrue(supported[98])
+        assertTrue(supported[108])
+    }
+
+    @Test
+    fun referenceHoleCannotCreateRegionalPhaseSupport() {
+        val beats = shifted(0, observed.lastIndex, .25)
+        val sparseReference = reference.filterIndexed { index, _ -> index !in 60..179 }
+
+        val evidence = PulsePhaseAudit.assess(beats, sparseReference)
+
+        assertEquals(PulsePhaseRelation.INCOHERENT, evidence.relation)
+        assertEquals(119, evidence.observedEvents)
+        assertEquals(119.0 / beats.size, evidence.coverage, 1e-12)
+        assertEquals(119.0 / beats.size, evidence.regionalCoverage, 1e-12)
+        assertEquals(2, evidence.supportedRanges.size)
+        assertTrue(
+            evidence.supportedRanges.none {
+                it.startSeconds < beats[59].seconds && it.endSeconds > beats[180].seconds
+            }
+        )
+    }
+
+    @Test
+    fun referenceIntervalCannotSetItsOwnCadenceBaseline() {
+        val beats = List(8) { Beat(.45 + it * .5, .95f) }
+        val evidence = PulsePhaseAudit.assess(beats, listOf(Beat(.2, .95f), Beat(4.7, .95f)))
+
+        assertEquals(PulsePhaseRelation.INSUFFICIENT, evidence.relation)
+        assertEquals(0, evidence.observedEvents)
+        assertEquals(0.0, evidence.coverage)
+    }
+
+    @Test
     fun constantAlignedClockRetainsWholeTrackSupportAndOriginalTimestamps() {
         val (result, song) = select(observed)
         assertTrue(result.pulse.quality.safeForAutomaticMix)
