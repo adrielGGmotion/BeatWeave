@@ -59,13 +59,30 @@ private constructor(
         }
 
         /** Beat anchors are exact; extra knots follow continuous tempo changes between them. */
-        fun from(plan: MixPlan, sourceDurationSeconds: Double): WarpSchedule {
+        fun from(plan: MixPlan, sourceDurationSeconds: Double): WarpSchedule =
+            from(plan, sourceDurationSeconds) {}
+
+        /** Internal cancellable path for potentially dense, long-running schedules. */
+        internal fun from(
+            plan: MixPlan,
+            sourceDurationSeconds: Double,
+            cancellationCheck: () -> Unit,
+        ): WarpSchedule {
             require(
                 sourceDurationSeconds.isFinite() &&
                     sourceDurationSeconds > 0.0 &&
                     sourceDurationSeconds <= 4 * 60 * 60
             ) {
                 "Source duration must be in (0, 4 hours]"
+            }
+            cancellationCheck()
+            var workSinceCancellationCheck = 0
+            fun checkCancellationPeriodically() {
+                workSinceCancellationCheck++
+                if (workSinceCancellationCheck >= 4096) {
+                    cancellationCheck()
+                    workSinceCancellationCheck = 0
+                }
             }
             val rate = plan.outputSampleRate
             val sourceFrames = sourceFrameCount(sourceDurationSeconds, rate)
@@ -91,6 +108,7 @@ private constructor(
             val endBeat = ceil(plan.first.position(end)).toInt()
             require(endBeat.toLong() - startBeat <= 1_000_000) { "Unreasonable beat density" }
             for (beat in startBeat..endBeat) {
+                checkCancellationPeriodically()
                 val out = plan.first.at(beat)
                 if (out > origin && out < end) {
                     val src = plan.secondSourceTime(out)
@@ -102,6 +120,7 @@ private constructor(
             val exactKnots = candidates.sortedBy { it.first }
             candidates.clear()
             fun subdivide(s0: Double, t0: Double, s1: Double, t1: Double, depth: Int) {
+                checkCancellationPeriodically()
                 if (depth >= 12 || (s1 - s0) * rate < 4) return
                 var error = 0.0
                 for (fraction in doubleArrayOf(0.25, 0.5, 0.75)) {
@@ -126,6 +145,7 @@ private constructor(
             val anchors = ArrayList<WarpAnchor>(candidates.size)
             anchors += WarpAnchor(0, 0)
             for ((src, out) in candidates.sortedBy { it.first }) {
+                checkCancellationPeriodically()
                 val sourceFrame = (src * rate).roundToLong()
                 val targetFrame = (out * rate).roundToLong() - originFrame
                 val last = anchors.last()
@@ -139,6 +159,7 @@ private constructor(
                 }
             }
             anchors += WarpAnchor(sourceFrames, outputFrames)
+            cancellationCheck()
             return WarpSchedule(rate, sourceFrames, originFrame, outputFrames, anchors)
         }
     }

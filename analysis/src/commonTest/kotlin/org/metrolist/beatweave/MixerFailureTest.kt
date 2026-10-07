@@ -80,6 +80,45 @@ class MixerFailureTest {
         assertEquals(1, engine.closes)
     }
 
+    @Test
+    fun cancellationDuringScheduleConstructionDoesNotStartEngine() {
+        val engine = RecordingEngine()
+        var cancellationChecks = 0
+
+        assertFailsWith<MixCancelledException> {
+            BeatMixer(engine).prepare(
+                source,
+                source,
+                plan,
+                isCancelled = { ++cancellationChecks >= 2 },
+            )
+        }
+
+        assertEquals(0, engine.prepares)
+        assertEquals(2, cancellationChecks)
+    }
+
+    private class RecordingEngine : PitchStretchEngine {
+        var prepares = 0
+
+        override fun prepare(
+            source: StereoPcm,
+            schedule: WarpSchedule,
+            progress: (Double) -> Unit,
+        ): PreparedStereoPcm {
+            prepares++
+            return object : PreparedStereoPcm {
+                override val durationSeconds =
+                    schedule.outputFrames.toDouble() / schedule.sampleRate
+
+                override fun read(startSeconds: Double, frames: Int, outputSampleRate: Int) =
+                    FloatArray(frames * 2)
+
+                override fun close() = Unit
+            }
+        }
+    }
+
     private class FailingCloseEngine(private val incorrectDuration: Boolean = false) :
         PitchStretchEngine {
         val closeFailure = UnsupportedOperationException("cache cleanup failed")
