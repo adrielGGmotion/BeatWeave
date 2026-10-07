@@ -366,7 +366,9 @@ class BeatMixer(private val engine: PitchStretchEngine? = null) {
                 first.durationSeconds <= 4 * 60 * 60
         )
         if (isCancelled()) throw MixCancelledException()
-        val schedule = WarpSchedule.from(plan, second.durationSeconds)
+        val schedule = WarpSchedule.from(plan, second.durationSeconds) {
+            if (isCancelled()) throw MixCancelledException()
+        }
         val reportProgress: (Double) -> Unit = {
             if (isCancelled()) throw MixCancelledException()
             progress(it.coerceIn(0.0, 1.0))
