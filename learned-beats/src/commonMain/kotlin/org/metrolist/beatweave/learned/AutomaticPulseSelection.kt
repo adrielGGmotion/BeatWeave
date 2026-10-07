@@ -397,7 +397,11 @@ object AutomaticPulseSelector {
             val period = (beats[index + 8].seconds - beats[index].seconds) / 8
             if (period > 0 && period.isFinite()) periods += period
         }
-        periods.sort()
+        var sortWork = 0
+        periods.sortWith { a, b ->
+            if (sortWork++ % 1024 == 0) cancellationCheck()
+            a.compareTo(b)
+        }
         cancellationCheck()
         return periods.getOrNull(periods.size / 2)?.let { 60 / it }
     }
