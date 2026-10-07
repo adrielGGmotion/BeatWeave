@@ -89,6 +89,13 @@ class ClockEndpointTest {
         val a = BeatGrid(DoubleArray(20) { it * 0.5 })
         val b = BeatGrid(doubleArrayOf(0.0, 0.6, 1.2, 1.8))
         val plan = MixPlan(a, b, 1, 0, crossfadeBeats = 8, releaseAfterFade = true)
+        for (beat in -20..40) {
+            assertEquals(
+                plan.secondSourceTime(plan.first.at(beat)),
+                plan.secondSourceTimeAtFirstBeat(beat),
+                1e-12,
+            )
+        }
         for (index in -100..200) {
             val t = index / 10.0
             assertEquals(t, plan.secondOutputTime(plan.secondSourceTime(t)), 1e-8)

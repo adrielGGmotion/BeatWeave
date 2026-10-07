@@ -272,6 +272,8 @@ data class MixPlan(
     /** Exact fast path when the caller already has an outgoing beat index. */
     internal fun secondSourceTimeAtFirstBeat(beat: Int): Double {
         val outputSeconds = first.at(beat)
+        if (releaseAfterFade && outputSeconds > fadeEndSeconds)
+            return secondSourceTime(outputSeconds)
         val coverage = observedCoverage
         if (beat <= observedStartBeat)
             return coverage.sourceStartSeconds +
