@@ -283,14 +283,44 @@ object PulsePhaseAudit {
                         inliers,
                     )
             }
-        val regionalCoverage =
-            phases
-                .count { phase ->
+        var coveredByRegion = 0
+        var firstPossibleRange = 0
+        // Normal detector clocks and the ranges built above are chronological. Advance one cursor
+        // instead of rescanning every range for every phase. Preserve the former membership scan
+        // for direct callers that supply an unordered observed clock.
+        var orderedPhases = true
+        for (index in 1 until phases.size) {
+            if (phases[index].seconds < phases[index - 1].seconds) {
+                orderedPhases = false
+                break
+            }
+        }
+        for ((index, phase) in phases.withIndex()) {
+            if (index % 256 == 0) cancellationCheck()
+            if (!orderedPhases) {
+                if (
                     ranges.any {
                         phase.seconds >= it.startSeconds && phase.seconds <= it.endSeconds
                     }
+                )
+                    coveredByRegion++
+                continue
+            }
+            while (
+                firstPossibleRange < ranges.size &&
+                    ranges[firstPossibleRange].endSeconds < phase.seconds
+            )
+                firstPossibleRange++
+            var range = firstPossibleRange
+            while (range < ranges.size && ranges[range].startSeconds <= phase.seconds) {
+                if (phase.seconds <= ranges[range].endSeconds) {
+                    coveredByRegion++
+                    break
                 }
-                .toDouble() / observed.size
+                range++
+            }
+        }
+        val regionalCoverage = coveredByRegion.toDouble() / observed.size
         val relation =
             when {
                 phases.size >= 8 && globalStable && direct >= 0.45 ->

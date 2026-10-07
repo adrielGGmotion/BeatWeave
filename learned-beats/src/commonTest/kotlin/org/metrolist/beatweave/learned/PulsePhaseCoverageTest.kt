@@ -260,4 +260,30 @@ class PulsePhaseCoverageTest {
         assertFalse(supported[80])
         assertTrue(supported.filterIndexed { index, _ -> index != 80 }.all { it })
     }
+
+    @Test
+    fun longRegionalCoverageAggregationPollsCancellation() {
+        val count = 2_048
+        val regionalReference = List(count + 2) { Beat(.2 + it * .5, .95f) }
+        val alternating =
+            List(count) { index ->
+                val offset = if ((index / 32) % 2 == 0) 0.0 else .25
+                Beat(.2 + index * .5 + offset, .95f)
+            }
+        val result = PulsePhaseAudit.assess(alternating, regionalReference)
+        assertEquals(PulsePhaseRelation.REGIONAL_SUPPORT, result.relation)
+        assertEquals(63, result.supportedRanges.size)
+        assertEquals(2_017.0 / count, result.regionalCoverage, 1e-12)
+
+        class Stop : RuntimeException()
+        var checks = 0
+        assertFailsWith<Stop> {
+            PulsePhaseAudit.assess(alternating, regionalReference) {
+                // The former all-ranges-per-event aggregation returned after 450 checks without
+                // observing this request; the ordered aggregation polls every 256 events.
+                if (++checks == 451) throw Stop()
+            }
+        }
+        assertEquals(451, checks)
+    }
 }
