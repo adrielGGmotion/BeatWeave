@@ -345,4 +345,41 @@ class BeatGridQualityTest {
         assertEquals(4.0 / 15.0, assertNotNull(report.referenceCoverage), 1e-12)
         assertTrue(report.issues.any { it.code == "INSUFFICIENT_REFERENCE_COVERAGE" })
     }
+
+    @Test
+    fun duplicateReferenceBracketsCannotCountAsMeasuredCadence() {
+        val beats = List(16) { Beat(0.475 + it * 0.5, 1.0f) }
+        val referenceBeats =
+            List(17) { 0.2 + it * 0.5 }.flatMap { seconds ->
+                listOf(Beat(seconds, 1.0f), Beat(seconds + 0.05, 1.0f))
+            }
+        val reference =
+            Analysis(
+                durationSeconds = 9.0,
+                bpm = 120.0,
+                tempoConfidence = 1.0,
+                beats = referenceBeats,
+                rmsDb = -12.0,
+                peakDb = -1.0,
+                spectralCentroidHz = 500.0,
+                keyEstimate = "unknown",
+                keyConfidence = 0.0,
+                energyBlocks = emptyList(),
+                onsetEnvelope = FloatArray(0),
+                onsetHopSeconds = 0.01,
+                warnings = emptyList(),
+            )
+
+        val report = BeatGridQuality.audit(beats, referenceBeats, reference.durationSeconds)
+        val normalized = PulseNormalizer.normalize(beats, reference)
+
+        assertEquals(0.0, assertNotNull(report.referenceCoverage))
+        assertFalse(report.safeForAutomaticMix)
+        assertTrue(report.issues.any { it.code == "INSUFFICIENT_REFERENCE_COVERAGE" })
+        assertEquals(0.0, normalized.canonicalAgreement)
+        assertEquals(beats, normalized.beats)
+        assertTrue(normalized.repairs.isEmpty())
+        assertFalse(normalized.quality.safeForAutomaticMix)
+        assertTrue(normalized.quality.issues.any { it.code == "UNCONFIRMED_CANONICAL_PULSE" })
+    }
 }
