@@ -86,6 +86,7 @@ object PulsePhaseAudit {
                 reference.zipWithNext().any { (a, b) -> b.seconds <= a.seconds }
         )
             return supported
+        val referencePeriods = measuredReferencePeriods(reference, cancellationCheck)
         for ((index, beat) in observed.withIndex()) {
             if (index % 32 == 0) cancellationCheck()
             if (!beat.seconds.isFinite()) continue
@@ -94,8 +95,8 @@ object PulsePhaseAudit {
                     if (it == 0 && beat.seconds == reference.first().seconds) 1 else it
                 }
             if (next == 0 || next == reference.size) continue
-            val period = reference[next].seconds - reference[next - 1].seconds
-            if (!period.isFinite() || period <= 0) continue
+            val period = referencePeriods[next - 1]
+            if (!period.isFinite()) continue
             val phase = (beat.seconds - reference[next - 1].seconds) / period
             val tolerance = min(0.16, 0.075 / period)
             supported[index] =
@@ -135,6 +136,7 @@ object PulsePhaseAudit {
 
         data class Observation(val seconds: Double, val phase: Double, val tolerance: Double)
         val phases = ArrayList<Observation>()
+        val referencePeriods = measuredReferencePeriods(reference, cancellationCheck)
         var directlyAligned = 0
         for ((eventIndex, beat) in observed.withIndex()) {
             if (eventIndex % 32 == 0) cancellationCheck()
@@ -146,8 +148,8 @@ object PulsePhaseAudit {
             // Do not extrapolate an independent clock beyond the measured reference.
             if (next == 0 || next == reference.size) continue
             val left = reference[next - 1].seconds
-            val right = reference[next].seconds
-            val period = right - left
+            val period = referencePeriods[next - 1]
+            if (!period.isFinite()) continue
             val phase = (beat.seconds - left) / period
             val tolerance = min(0.16, 0.075 / period)
             if (circularDistance(phase, 0.0) <= tolerance) directlyAligned++
@@ -289,6 +291,29 @@ object PulsePhaseAudit {
             ranges,
             regionalCoverage,
         )
+    }
+
+    /** Reject brackets that skip one or more pulses instead of treating the whole hole as a period. */
+    private fun measuredReferencePeriods(
+        reference: List<Beat>,
+        cancellationCheck: () -> Unit,
+    ): DoubleArray {
+        val measured = DoubleArray(reference.size - 1) { Double.NaN }
+        for (intervalIndex in measured.indices) {
+            if (intervalIndex % 32 == 0) cancellationCheck()
+            val centre = intervalIndex + 1
+            val lo = max(0, centre - 8)
+            val hi = min(reference.lastIndex, centre + 8)
+            val localIntervals =
+                (lo until hi)
+                    .map { reference[it + 1].seconds - reference[it].seconds }
+                    .filter { it > 0 && it.isFinite() }
+                    .sorted()
+            val localPeriod = localIntervals.getOrNull(localIntervals.size / 2) ?: continue
+            val period = reference[intervalIndex + 1].seconds - reference[intervalIndex].seconds
+            if (period / localPeriod <= 1.48) measured[intervalIndex] = period
+        }
+        return measured
     }
 
     private fun circularDistance(a: Double, b: Double): Double = abs((a - b + 1.5) % 1.0 - 0.5)
