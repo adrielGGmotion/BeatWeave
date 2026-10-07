@@ -63,6 +63,7 @@ Quiet cadence interpolation likewise requires measured cadence at the implied pu
 supported repairs on either side cannot bridge an internal reference hole.
 Phase assessment and per-event phase support apply the same local-cadence check; observations
 inside a reference hole do not count toward phase coverage and cannot authorize a canonical range.
+Regional phase windows stop at those holes, and their coverage counts only measured observations.
 Automatic pulse diagnostics report that missing-reference rejection without deriving phase, onset,
 or score evidence from the malformed candidate.
 Clock-quality assessment also streams ordered beat sections without materializing and sorting a
