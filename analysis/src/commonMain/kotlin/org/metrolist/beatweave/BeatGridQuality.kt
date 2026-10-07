@@ -118,8 +118,10 @@ object BeatGridQuality {
                 while (
                     nextReference < referenceBeats.size &&
                         referenceBeats[nextReference].seconds < midpoint
-                )
+                ) {
+                    checkCancellationPeriodically()
                     nextReference++
+                }
                 if (
                     nextReference >= referenceBeats.size ||
                         midpoint < referenceBeats[nextReference - 1].seconds
@@ -143,7 +145,15 @@ object BeatGridQuality {
                 return BeatGridQualityReport(beats.size, 0.0, issues, referenceCoverage)
             }
         }
-        val median = intervals.sorted().let { if (it.isEmpty()) 0.0 else it[it.size / 2] }
+        val sortedIntervals = intervals.toMutableList()
+        var sortWork = 0
+        sortedIntervals.sortWith { a, b ->
+            if (sortWork++ % (PULSE_CANCELLATION_INTERVAL * 4) == 0) cancellationCheck()
+            a.compareTo(b)
+        }
+        val median =
+            if (sortedIntervals.isEmpty()) 0.0
+            else sortedIntervals[sortedIntervals.size / 2]
         for (i in intervals.indices) {
             checkCancellationPeriodically()
             val a = beats[i].seconds
