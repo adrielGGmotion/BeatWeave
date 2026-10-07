@@ -52,7 +52,10 @@ class BeatThisFrontend {
         require(mono22050.size > FFT_SIZE / 2) {
             "At least 513 samples of 22050 Hz PCM are required"
         }
-        require(mono22050.all { it.isFinite() }) { "PCM contains non-finite samples" }
+        for (index in mono22050.indices) {
+            if (index % PCM_CANCELLATION_INTERVAL == 0) cancellationCheck()
+            require(mono22050[index].isFinite()) { "PCM contains non-finite samples" }
+        }
         val frames = 1 + mono22050.size / HOP
         require(frames <= Int.MAX_VALUE / BINS) { "Audio is too long" }
         val values = FloatArray(frames * BINS)
@@ -128,6 +131,8 @@ class BeatThisFrontend {
         }
     }
 }
+
+private const val PCM_CANCELLATION_INTERVAL = 8192
 
 class MelSpectrogram(val frames: Int, val values: FloatArray) {
     init {
