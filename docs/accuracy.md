@@ -46,8 +46,10 @@ supply an independent reference clock, it must contain at least three observatio
 must be finite, non-negative, strictly ordered, and inside that duration, and its strengths must be
 finite. Malformed or insufficient references fail the audit instead of being filtered out of
 cadence comparisons. At least 80% of candidate intervals must also be bracketed by the measured
-reference clock without a gap larger than 1.48 times its local period; the audit does not treat an
-extrapolated edge cadence or an internal observation hole as independent evidence.
+reference clock with a bracket between 0.62 and 1.48 times its neighboring local period; the audit
+does not treat an extrapolated edge cadence, an internal observation hole, or a duplicate reference
+observation as independent evidence. The bracket under test is excluded from its own cadence
+baseline.
 The report exposes that exact measured fraction as `referenceCoverage`; it is `null` when callers
 do not supply a valid independent reference clock. This diagnostic does not relax the 80% gate.
 Canonical pulse agreement likewise scores only intervals bracketed by usable reference observations;
@@ -62,8 +64,9 @@ extrapolated period.
 Quiet cadence interpolation likewise requires measured cadence at the implied pulse itself, so
 supported repairs on either side cannot bridge an internal reference hole.
 Phase assessment and per-event phase support apply the same local-cadence check; observations
-inside a reference hole do not count toward phase coverage and cannot authorize a canonical range.
-Regional phase windows stop at those holes, and their coverage counts only measured observations.
+inside a reference hole or abnormally short duplicate bracket do not count toward phase coverage
+and cannot authorize a canonical range. Regional phase windows stop at those brackets, and their
+coverage counts only measured observations.
 Automatic pulse diagnostics report that missing-reference rejection without deriving phase, onset,
 or score evidence from the malformed candidate.
 Clock-quality assessment also streams ordered beat sections without materializing and sorting a
