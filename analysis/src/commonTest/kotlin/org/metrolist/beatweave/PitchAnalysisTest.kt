@@ -317,4 +317,29 @@ class PitchAnalysisTest {
         // Before in-transform polling, this one-window analysis made only 27 checks and returned.
         assertTrue(checks >= 28)
     }
+
+    @Test
+    fun maximumWindowCancellationCoversLinearFftPasses() {
+        class Cancelled : RuntimeException()
+        val rate = 384000
+        val options =
+            PitchAnalysisOptions(
+                minimumFrequencyHz = 20.0,
+                maximumFrequencyHz = 2000.0,
+                hopSeconds = 0.5,
+                windowSeconds = 0.5,
+            )
+        val pcm = tone(220.0, rate, seconds = 0.5)
+        var checks = 0
+
+        assertFailsWith<Cancelled> {
+            PitchAnalyzer(options).analyze(pcm, rate) {
+                if (++checks == 338) throw Cancelled()
+            }
+        }
+        // Previously this maximum-size analysis completed after 337 polls: bit reversal,
+        // spectrum conversion, inverse normalization and the final 262,144-butterfly stage
+        // could not observe a cancellation request within their linear work.
+        assertEquals(338, checks)
+    }
 }
