@@ -137,7 +137,7 @@ class PitchAnalyzer(private val options: PitchAnalysisOptions = PitchAnalysisOpt
             )
         var cacheStart = -1L
         var cacheFrames = 0
-        var stereoCache = FloatArray(0)
+        val stereoCache = FloatArray(cacheCapacity * 2)
         var selectedChannel = -1
         return analyzeWindows(layout, analysisSampleRate, duration, cancellationCheck) { start, window ->
             if (
@@ -145,12 +145,29 @@ class PitchAnalyzer(private val options: PitchAnalysisOptions = PitchAnalysisOpt
                     start < cacheStart ||
                     start + window.size > cacheStart + cacheFrames
             ) {
+                val retainedFrames =
+                    if (cacheStart >= 0L && start in cacheStart until cacheStart + cacheFrames) {
+                        cacheFrames - (start - cacheStart).toInt()
+                    } else {
+                        0
+                    }
+                if (retainedFrames > 0) {
+                    val retainedOffset = ((start - cacheStart) * 2L).toInt()
+                    stereoCache.copyInto(
+                        destination = stereoCache,
+                        startIndex = retainedOffset,
+                        endIndex = retainedOffset + retainedFrames * 2,
+                    )
+                }
                 cacheStart = start
                 cacheFrames = min(sampleCount - start, cacheCapacity.toLong()).toInt()
-                stereoCache = source.readFrames(cacheStart, cacheFrames, analysisSampleRate)
-                require(stereoCache.size == cacheFrames * 2) {
+                val missingFrames = cacheFrames - retainedFrames
+                val decoded =
+                    source.readFrames(cacheStart + retainedFrames, missingFrames, analysisSampleRate)
+                require(decoded.size == missingFrames * 2) {
                     "Stereo source returned an incorrect frame count"
                 }
+                decoded.copyInto(stereoCache, destinationOffset = retainedFrames * 2)
             }
             val offset = (start - cacheStart).toInt()
             var leftMean = 0.0
