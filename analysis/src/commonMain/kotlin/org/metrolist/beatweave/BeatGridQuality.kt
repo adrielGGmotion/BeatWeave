@@ -109,11 +109,8 @@ object BeatGridQuality {
                         midpoint < referenceBeats[nextReference - 1].seconds
                 )
                     continue
-                val localPeriod = PulseNormalizer.localPeriod(referenceBeats, midpoint) ?: continue
-                val measuredGap =
-                    referenceBeats[nextReference].seconds -
-                        referenceBeats[nextReference - 1].seconds
-                if (measuredGap / localPeriod > 1.48) continue
+                val localPeriod =
+                    PulseNormalizer.measuredLocalPeriod(referenceBeats, midpoint) ?: continue
                 referencePeriods[index] = localPeriod
                 coveredIntervals++
             }
@@ -527,16 +524,29 @@ object PulseNormalizer {
         return intervals.getOrNull(intervals.size / 2)
     }
 
-    /** A local cadence is evidence only when two nearby reference observations bracket it. */
-    private fun measuredLocalPeriod(beats: List<Beat>, at: Double): Double? {
+    /**
+     * A local cadence is evidence only when two nearby reference observations bracket it. The
+     * bracket under test cannot establish its own baseline: this rejects both missing observations
+     * and duplicate/subdivision observations without mistaking either for a tempo change.
+     */
+    internal fun measuredLocalPeriod(beats: List<Beat>, at: Double): Double? {
         val next =
             lowerBound(beats, at).let {
                 if (it == 0 && at == beats.first().seconds) 1 else it
             }
         if (next == 0 || next == beats.size) return null
-        val period = localPeriod(beats, at) ?: return null
+        val centre = lowerBound(beats, at)
+        val lo = max(0, centre - 8)
+        val hi = min(beats.lastIndex, centre + 8)
+        val period =
+            (lo until hi)
+                .filter { it != next - 1 }
+                .map { beats[it + 1].seconds - beats[it].seconds }
+                .filter { it > 0 && it.isFinite() }
+                .sorted()
+                .let { it.getOrNull(it.size / 2) } ?: return null
         val measuredGap = beats[next].seconds - beats[next - 1].seconds
-        return period.takeIf { measuredGap / it <= 1.48 }
+        return period.takeIf { measuredGap / it in 0.62..1.48 }
     }
 
     private fun nearest(beats: List<Beat>, at: Double): Beat? {
