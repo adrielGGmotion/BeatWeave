@@ -138,13 +138,9 @@ class LocalSongAnalyzer(private val backend: BeatThisBackend) {
                 selection.regions.excluded.map {
                     "EXCLUDED_PULSE_REGION: ${it.startSeconds}..${it.endSeconds}s (${it.reasons.joinToString()})"
                 }
-        val spans =
-            normalized.beats
-                .windowed(9)
-                .map { (it.last().seconds - it.first().seconds) / 8 }
-                .sorted()
         val tempo =
-            if (spans.isEmpty()) normalized.quality.medianBpm else 60.0 / spans[spans.size / 2]
+            canonicalPulseBpm(normalized.beats, cancellationCheck)
+                ?: normalized.quality.medianBpm
         // Reuse spectral/energy features. Original model events remain available in
         // model/rawBeats; this Analysis explicitly describes the canonical pulse.
         val summary =
@@ -153,11 +149,7 @@ class LocalSongAnalyzer(private val backend: BeatThisBackend) {
                 beats = normalized.beats,
                 downbeatSeconds = bars.downbeatSeconds,
                 tempoConfidence = normalized.canonicalAgreement,
-                beatConfidence =
-                    normalized.beats
-                        .map { it.strength.toDouble().coerceIn(0.0, 1.0) }
-                        .average()
-                        .let { if (it.isFinite()) it else 0.0 },
+                beatConfidence = meanBeatStrength(normalized.beats, cancellationCheck),
                 tempoCandidates =
                     selection.diagnostics.candidates.map {
                         TempoCandidate(it.bpm, it.spectralSupport)

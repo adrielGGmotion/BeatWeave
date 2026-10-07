@@ -75,7 +75,7 @@ object AutomaticPulseSelector {
         cancellationCheck: () -> Unit = {},
     ): AutomaticPulseResult {
         cancellationCheck()
-        val modelPulse = robustPulse(model.beats, cancellationCheck)
+        val modelPulse = robustModelPulseBpm(model.beats, cancellationCheck)
         val activations =
             FloatArray(model.logits.beat.size) {
                 if (it % 4096 == 0) cancellationCheck()
@@ -387,23 +387,6 @@ object AutomaticPulseSelector {
         val regions =
             PulseRegions.analyze(chosenPulse, chosenReference, accepted, cancellationCheck)
         return AutomaticPulseResult(chosenReference, chosenPulse, diagnostics, regions)
-    }
-
-    private fun robustPulse(beats: List<Beat>, cancellationCheck: () -> Unit): Double? {
-        cancellationCheck()
-        val periods = ArrayList<Double>(max(0, beats.size - 8))
-        for (index in 0..beats.size - 9) {
-            if (index % 256 == 0) cancellationCheck()
-            val period = (beats[index + 8].seconds - beats[index].seconds) / 8
-            if (period > 0 && period.isFinite()) periods += period
-        }
-        var sortWork = 0
-        periods.sortWith { a, b ->
-            if (sortWork++ % 1024 == 0) cancellationCheck()
-            a.compareTo(b)
-        }
-        cancellationCheck()
-        return periods.getOrNull(periods.size / 2)?.let { 60 / it }
     }
 
     private fun approximateAgreement(
