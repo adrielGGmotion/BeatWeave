@@ -93,6 +93,38 @@ class PreparedMusicAnalysisTest {
     }
 
     @Test
+    fun cancellationInterruptsSpectralNormalizationBeforeSilentReturn() {
+        class Cancelled : RuntimeException()
+        val prepared = MusicAnalyzer().prepare(FloatArray(rate * 12), rate)
+        var checks = 0
+
+        assertFailsWith<Cancelled> {
+            prepared.analyze(cancellationCheck = {
+                if (++checks == 3) throw Cancelled()
+            })
+        }
+
+        // Before normalization polling, a silent search returned after only two callbacks.
+        assertEquals(3, checks)
+    }
+
+    @Test
+    fun cancellationInterruptsInsideAutocorrelationScan() {
+        class Cancelled : RuntimeException()
+        val prepared = MusicAnalyzer().prepare(audio(), rate)
+        var checks = 0
+
+        assertFailsWith<Cancelled> {
+            prepared.analyze(cancellationCheck = {
+                if (++checks == 100) throw Cancelled()
+            })
+        }
+
+        // The old outer-lag polling completed this search after only 78 callbacks.
+        assertEquals(100, checks)
+    }
+
+    @Test
     fun cancellableFftPreservesForwardTransform() {
         val real = doubleArrayOf(1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
         val imaginary = DoubleArray(real.size)

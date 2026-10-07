@@ -56,13 +56,13 @@ internal object BeatDetector {
         val rate = audio.rate
         val hop = audio.hop
         val step = hop.toDouble() / rate
-        val envelope = normalize(flux, step)
+        val envelope = normalize(flux, step, cancellationCheck)
         if (audio.peak < 1e-7f || envelope.maxOrNull()!! < 1e-5f) {
             return Result(0.0, emptyList(), envelope, emptyList(), 0.0, 0.0, true)
         }
         // Smooth by 10 ms before periodicity scoring; integer-bin autocorrelation without
         // this step penalizes non-integer BPMs differently according to FFT hop size.
-        val evidence = gaussian(envelope, max(0.7, 0.010 / step))
+        val evidence = gaussian(envelope, max(0.7, 0.010 / step), cancellationCheck)
         val minPeriod = 60.0 / 240.0 / step
         val maxPeriod = min(evidence.size / 3.0, 60.0 / 40.0 / step)
         if (maxPeriod <= minPeriod)
@@ -189,21 +189,34 @@ internal object BeatDetector {
         return Result(bpm, beats, envelope, sorted, periodicity, beatConfidence, ambiguous)
     }
 
-    private fun normalize(flux: FloatArray, step: Double): FloatArray {
+    private fun normalize(
+        flux: FloatArray,
+        step: Double,
+        cancellationCheck: () -> Unit,
+    ): FloatArray {
         val prefix = DoubleArray(flux.size + 1)
-        for (i in flux.indices) prefix[i + 1] = prefix[i] + flux[i]
+        for (i in flux.indices) {
+            if (i % DETECTOR_CANCELLATION_INTERVAL == 0) cancellationCheck()
+            prefix[i + 1] = prefix[i] + flux[i]
+        }
         val radius = max(1, (0.2 / step).roundToInt())
-        val onset =
-            FloatArray(flux.size) { i ->
-                val lo = max(0, i - radius)
-                val hi = min(flux.size, i + radius + 1)
+        val onset = FloatArray(flux.size)
+        for (i in flux.indices) {
+            if (i % DETECTOR_CANCELLATION_INTERVAL == 0) cancellationCheck()
+            val lo = max(0, i - radius)
+            val hi = min(flux.size, i + radius + 1)
+            onset[i] =
                 max(0.0, flux[i] - (prefix[hi] - prefix[lo]) / (hi - lo)).toFloat()
-            }
+        }
         val power = DoubleArray(flux.size + 1)
-        for (i in onset.indices) power[i + 1] = power[i] + onset[i].toDouble().pow(2)
+        for (i in onset.indices) {
+            if (i % DETECTOR_CANCELLATION_INTERVAL == 0) cancellationCheck()
+            power[i + 1] = power[i] + onset[i].toDouble().pow(2)
+        }
         val longRadius = (3.0 / step).roundToInt()
         val floor = sqrt(power.last() / max(1, onset.size)) * 0.15 + 1e-7
         for (i in onset.indices) {
+            if (i % DETECTOR_CANCELLATION_INTERVAL == 0) cancellationCheck()
             val lo = max(0, i - longRadius)
             val hi = min(onset.size, i + longRadius + 1)
             onset[i] =
@@ -212,11 +225,16 @@ internal object BeatDetector {
         return onset
     }
 
-    private fun gaussian(input: FloatArray, sigma: Double): DoubleArray {
+    private fun gaussian(
+        input: FloatArray,
+        sigma: Double,
+        cancellationCheck: () -> Unit,
+    ): DoubleArray {
         val radius = ceil(3 * sigma).toInt()
         val weights = DoubleArray(radius * 2 + 1) { exp(-0.5 * ((it - radius) / sigma).pow(2)) }
         val total = weights.sum()
         return DoubleArray(input.size) { i ->
+            if (i % DETECTOR_CANCELLATION_INTERVAL == 0) cancellationCheck()
             var sum = 0.0
             for (j in -radius..radius) if (i + j in input.indices)
                 sum += input[i + j] * weights[j + radius]
@@ -229,13 +247,32 @@ internal object BeatDetector {
         maxLag: Int,
         cancellationCheck: () -> Unit,
     ): DoubleArray {
-        val mean = x.average()
-        val centered = DoubleArray(x.size) { x[it] - mean }
-        val energy = centered.sumOf { it * it }.coerceAtLeast(1e-12)
+        var total = 0.0
+        for (i in x.indices) {
+            if (i % DETECTOR_CANCELLATION_INTERVAL == 0) cancellationCheck()
+            total += x[i]
+        }
+        val mean = total / x.size
+        val centered = DoubleArray(x.size)
+        for (i in x.indices) {
+            if (i % DETECTOR_CANCELLATION_INTERVAL == 0) cancellationCheck()
+            centered[i] = x[i] - mean
+        }
+        var energy = 0.0
+        for (i in centered.indices) {
+            if (i % DETECTOR_CANCELLATION_INTERVAL == 0) cancellationCheck()
+            energy += centered[i] * centered[i]
+        }
+        energy = energy.coerceAtLeast(1e-12)
         return DoubleArray(min(x.size, maxLag + 1)) { lag ->
-            if (lag % 16 == 0) cancellationCheck()
             var sum = 0.0
-            for (i in lag until x.size) sum += centered[i] * centered[i - lag]
+            var start = lag
+            while (start < x.size) {
+                cancellationCheck()
+                val end = min(x.size, start + DETECTOR_CANCELLATION_INTERVAL)
+                for (i in start until end) sum += centered[i] * centered[i - lag]
+                start = end
+            }
             sum / energy * x.size / max(1, x.size - lag)
         }
     }
@@ -379,3 +416,5 @@ internal object BeatDetector {
         return x[left] * (1 - f) + x[left + 1] * f
     }
 }
+
+private const val DETECTOR_CANCELLATION_INTERVAL = 8192
