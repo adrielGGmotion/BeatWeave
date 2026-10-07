@@ -134,6 +134,22 @@ class PulsePhaseCoverageTest {
     }
 
     @Test
+    fun missingReferenceIntervalCannotProvidePhaseCoverageOrLocalSupport() {
+        val beats = shifted(0, observed.lastIndex, .25)
+        val sparseReference = reference.filterIndexed { index, _ -> index !in 100..107 }
+
+        val evidence = PulsePhaseAudit.assess(beats, sparseReference)
+        val supported = PulsePhaseAudit.locallySupported(beats, sparseReference, evidence)
+
+        assertEquals(PulsePhaseRelation.STABLE_OFFSET, evidence.relation)
+        assertEquals(231, evidence.observedEvents)
+        assertEquals(231.0 / beats.size, evidence.coverage, 1e-12)
+        assertTrue((99..107).none { supported[it] })
+        assertTrue(supported[98])
+        assertTrue(supported[108])
+    }
+
+    @Test
     fun constantAlignedClockRetainsWholeTrackSupportAndOriginalTimestamps() {
         val (result, song) = select(observed)
         assertTrue(result.pulse.quality.safeForAutomaticMix)
