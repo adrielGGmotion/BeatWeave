@@ -75,6 +75,38 @@ class RubberBandEngineTest {
     }
 
     @Test
+    fun identityUsesOnlyItsSourceSnapshotAndSingleFileDiskBudget() = withCache { cache ->
+        val schedule = WarpSchedule.from(plan(), 2.0)
+        val sourceBytes = schedule.sourceFrames * 8L
+        val constrainedCache = object : File(cache.absolutePath) {
+            override fun getUsableSpace() = 1024L * 1024L + sourceBytes + 1L
+        }
+        val original = source()
+        var peakFiles = 0
+        val observed = object : StereoPcm {
+            override val durationSeconds = original.durationSeconds
+            override fun read(startSeconds: Double, frames: Int, outputSampleRate: Int) =
+                readFrames((startSeconds * outputSampleRate).toLong(), frames, outputSampleRate)
+            override fun readFrames(startFrame: Long, frames: Int, outputSampleRate: Int): FloatArray {
+                peakFiles = maxOf(peakFiles, cache.listFiles()!!.size)
+                return original.readFrames(startFrame, frames, outputSampleRate)
+            }
+        }
+
+        val prepared = RubberBandEngine(constrainedCache).prepare(observed, schedule) {}
+        try {
+            assertEquals(1, peakFiles)
+            assertContentEquals(
+                original.readFrames(12345, 6000, rate),
+                prepared.readFrames(12345, 6000, rate),
+            )
+        } finally {
+            prepared.close()
+        }
+        assertTrue(cache.listFiles()!!.isEmpty())
+    }
+
+    @Test
     fun fractionalStretchHasExactDurationAndIndependentStereoChannels() = withCache { cache ->
         val source = source()
         val schedule = WarpSchedule.from(plan(1.031), source.durationSeconds)
