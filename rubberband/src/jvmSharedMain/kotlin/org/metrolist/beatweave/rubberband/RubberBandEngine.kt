@@ -45,8 +45,14 @@ class RubberBandEngine(private val cacheDirectory: File) : PitchShiftEngine {
         if (!cacheDirectory.isDirectory) cacheDirectory.mkdirs()
         // Another preparation may create the same directory between the two calls.
         require(cacheDirectory.isDirectory) { "Cannot create audio cache directory" }
+        val identity = schedule.isTranslationOnly && pitchShift.isIdentity
+        // Identity returns the source snapshot itself. Do not reserve a second full-size file
+        // that is never populated, especially when a long mix is close to the cache limit.
+        val cachedFrames =
+            if (identity) schedule.sourceFrames
+            else Math.addExact(schedule.sourceFrames, schedule.outputFrames)
         val bytesNeeded =
-            Math.multiplyExact(Math.addExact(schedule.sourceFrames, schedule.outputFrames), 8L)
+            Math.multiplyExact(cachedFrames, 8L)
         val free = cacheDirectory.usableSpace
         require(free <= 0 || free > bytesNeeded + 1024 * 1024) {
             "Not enough free space for prepared audio"
@@ -57,33 +63,36 @@ class RubberBandEngine(private val cacheDirectory: File) : PitchShiftEngine {
         try {
             // LinkageError is intentional: missing/incompatible native libraries cannot
             // silently select an engine with different timing or pitch behavior.
-            val identity = schedule.isTranslationOnly && pitchShift.isIdentity
-            handle = if (pitchShift.isIdentity) {
-                RubberBandBridge.create(
-                    schedule.sampleRate,
-                    schedule.sourceFrames,
-                    schedule.outputFrames,
-                )
-            } else {
-                RubberBandBridge.createWithPitch(
-                    schedule.sampleRate,
-                    schedule.sourceFrames,
-                    schedule.outputFrames,
-                    pitchShift.ratio,
-                    pitchShift.preserveFormants,
+            // The bit-exact identity path needs no native processing or output cache.
+            if (!identity) {
+                handle = if (pitchShift.isIdentity) {
+                    RubberBandBridge.create(
+                        schedule.sampleRate,
+                        schedule.sourceFrames,
+                        schedule.outputFrames,
+                    )
+                } else {
+                    RubberBandBridge.createWithPitch(
+                        schedule.sampleRate,
+                        schedule.sourceFrames,
+                        schedule.outputFrames,
+                        pitchShift.ratio,
+                        pitchShift.preserveFormants,
+                    )
+                }
+                check(handle != 0L && RubberBandBridge.engineVersion(handle) == 3) {
+                    "Rubber Band R3 is required"
+                }
+                val anchors = schedule.anchors
+                RubberBandBridge.setKeyFrames(
+                    handle,
+                    LongArray(anchors.size) { anchors[it].sourceFrame },
+                    LongArray(anchors.size) { anchors[it].outputFrame },
                 )
             }
-            check(handle != 0L && RubberBandBridge.engineVersion(handle) == 3) {
-                "Rubber Band R3 is required"
-            }
-            val anchors = schedule.anchors
-            RubberBandBridge.setKeyFrames(
-                handle,
-                LongArray(anchors.size) { anchors[it].sourceFrame },
-                LongArray(anchors.size) { anchors[it].outputFrame },
-            )
             inputFile = File.createTempFile("beatweave-source-", ".f32", cacheDirectory)
-            outputFile = File.createTempFile("beatweave-stretched-", ".f32", cacheDirectory)
+            if (!identity)
+                outputFile = File.createTempFile("beatweave-stretched-", ".f32", cacheDirectory)
             val block = 4096
             val io = ByteBuffer.allocate(block * 8).order(ByteOrder.LITTLE_ENDIAN)
             val pcm = FloatArray(block * 2)
@@ -118,8 +127,6 @@ class RubberBandEngine(private val cacheDirectory: File) : PitchShiftEngine {
                     // Identity must be bit-for-bit: running an unnecessary STFT can
                     // alter transients even when the requested stretch is exactly one.
                     snapshot.channel.force(false)
-                    outputFile!!.delete()
-                    outputFile = null
                     update(1.0)
                     val result =
                         DiskPreparedPcm(inputFile!!, schedule.sampleRate, schedule.outputFrames)
