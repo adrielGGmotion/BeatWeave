@@ -174,8 +174,8 @@ internal object BeatDetector {
             corrected
                 .map { (frame, strength) -> Beat(frame * step, strength) }
                 .filter { it.seconds >= 0 && it.seconds < audio.sampleCount.toDouble() / rate }
-        val spans = beats.windowed(9).map { (it.last().seconds - it.first().seconds) / 8 }.sorted()
-        val bpm = if (spans.isNotEmpty()) 60.0 / spans[spans.size / 2] else selected.bpm
+        val span = robustBeatInterval(beats, cancellationCheck)
+        val bpm = if (span != null) 60.0 / span else selected.bpm
         val medianStrength =
             frameBeats
                 .map { at(evidence, it.toDouble()) }

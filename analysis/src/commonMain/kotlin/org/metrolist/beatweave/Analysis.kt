@@ -65,20 +65,50 @@ class MusicAnalyzer {
     ): Analysis {
         require(modelId.isNotBlank()) { "A detector identity is required" }
         val duration = pcm.size.toDouble() / sampleRate
-        require(
-            observedBeats.all {
-                it.seconds.isFinite() &&
-                    it.seconds >= 0 &&
-                    it.seconds < duration &&
-                    it.strength.isFinite()
-            }
-        )
-        require(observedBeats.zipWithNext().all { (a, b) -> b.seconds > a.seconds }) {
-            "Beats must be strictly ordered"
+        var index = 0
+        var beatIterator = observedBeats.iterator()
+        while (beatIterator.hasNext()) {
+            if (index % SOURCE_CLOCK_CANCELLATION_INTERVAL == 0) cancellationCheck()
+            val beat = beatIterator.next()
+            require(
+                beat.seconds.isFinite() &&
+                    beat.seconds >= 0 &&
+                    beat.seconds < duration &&
+                    beat.strength.isFinite()
+            )
+            index++
         }
-        require(downbeatSeconds.all { it.isFinite() && it >= 0 && it < duration })
-        require(downbeatSeconds.zipWithNext().all { (a, b) -> b > a }) {
-            "Downbeats must be strictly ordered"
+        var previousBeat: Beat? = null
+        index = 0
+        beatIterator = observedBeats.iterator()
+        while (beatIterator.hasNext()) {
+            if (index % SOURCE_CLOCK_CANCELLATION_INTERVAL == 0) cancellationCheck()
+            val beat = beatIterator.next()
+            previousBeat?.let {
+                require(beat.seconds > it.seconds) { "Beats must be strictly ordered" }
+            }
+            previousBeat = beat
+            index++
+        }
+        index = 0
+        var downbeatIterator = downbeatSeconds.iterator()
+        while (downbeatIterator.hasNext()) {
+            if (index % SOURCE_CLOCK_CANCELLATION_INTERVAL == 0) cancellationCheck()
+            val downbeat = downbeatIterator.next()
+            require(downbeat.isFinite() && downbeat >= 0 && downbeat < duration)
+            index++
+        }
+        var previousDownbeat: Double? = null
+        index = 0
+        downbeatIterator = downbeatSeconds.iterator()
+        while (downbeatIterator.hasNext()) {
+            if (index % SOURCE_CLOCK_CANCELLATION_INTERVAL == 0) cancellationCheck()
+            val downbeat = downbeatIterator.next()
+            previousDownbeat?.let {
+                require(downbeat > it) { "Downbeats must be strictly ordered" }
+            }
+            previousDownbeat = downbeat
+            index++
         }
         return prepare(pcm, sampleRate, cancellationCheck)
             .withObservedBeats(observedBeats, downbeatSeconds, modelId, cancellationCheck)
@@ -399,4 +429,5 @@ internal fun analysisFft(
 private const val KEY_FINE_BINS_PER_SEMITONE = 12
 private const val MINIMUM_KEY_TUNING_CONCENTRATION = 0.10
 private const val PCM_CANCELLATION_INTERVAL = 65536
+private const val SOURCE_CLOCK_CANCELLATION_INTERVAL = 256
 private const val ANALYSIS_FFT_CANCELLATION_OPERATIONS = 32768

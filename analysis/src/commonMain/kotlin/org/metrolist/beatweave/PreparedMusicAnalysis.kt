@@ -37,12 +37,8 @@ internal constructor(
     ): Analysis {
         cancellationCheck()
         // Match the source-clock behavior of MusicAnalyzer.analyzeWithBeats.
-        val intervals =
-            (if (observedBeats.size >= 9)
-                    observedBeats.windowed(9).map { (it.last().seconds - it.first().seconds) / 8 }
-                else observedBeats.zipWithNext { a, b -> b.seconds - a.seconds })
-                .sorted()
-        val bpm = if (intervals.isEmpty()) 0.0 else 60.0 / intervals[intervals.size / 2]
+        val interval = robustBeatInterval(observedBeats, cancellationCheck)
+        val bpm = if (interval == null) 0.0 else 60.0 / interval
         val score =
             observedBeats
                 .map { it.strength.toDouble() }

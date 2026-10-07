@@ -144,4 +144,36 @@ class DetectorContractTest {
                 )
         }
     }
+
+    @Test
+    fun cancellationStopsLongSourceClockValidationAtTheFirstBoundary() {
+        class Cancelled : RuntimeException()
+        var reads = 0
+        val beats =
+            object : AbstractList<Beat>() {
+                override val size = 50_000
+
+                override fun get(index: Int): Beat {
+                    reads++
+                    return Beat(index * 0.00005, 0.8f)
+                }
+            }
+        var polls = 0
+
+        assertFailsWith<Cancelled> {
+            MusicAnalyzer()
+                .analyzeWithBeats(
+                    FloatArray(4000 * 3),
+                    4000,
+                    beats,
+                    modelId = "test-model",
+                ) {
+                    if (++polls == 2) throw Cancelled()
+                }
+        }
+
+        // Previously all 50,000 observations were read before cancellation reached PCM analysis.
+        assertEquals(256, reads)
+        assertEquals(2, polls)
+    }
 }
