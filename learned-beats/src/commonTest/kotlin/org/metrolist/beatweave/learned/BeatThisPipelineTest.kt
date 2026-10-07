@@ -118,6 +118,21 @@ class BeatThisPipelineTest {
     }
 
     @Test
+    fun cancellationInterruptsPcmValidationBeforeALaterInvalidSample() {
+        class Cancelled : RuntimeException()
+        val pcm = FloatArray(100_000).also { it[90_000] = Float.NaN }
+        var checks = 0
+
+        assertFailsWith<Cancelled> {
+            BeatThisFrontend().transform(pcm) {
+                if (++checks == 2) throw Cancelled()
+            }
+        }
+
+        assertEquals(2, checks)
+    }
+
+    @Test
     fun frontendMatchesIndependentTorchGoldenValues() {
         // Oracle: torchaudio LogMelSpect at the provenance commit, not this implementation.
         // Boundary frames exercise centered reflection, interior frames FFT/mel normalization.
