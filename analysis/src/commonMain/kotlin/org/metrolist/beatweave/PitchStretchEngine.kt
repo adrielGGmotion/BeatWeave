@@ -19,7 +19,8 @@ private constructor(
     val outputFrames: Long,
     anchors: List<WarpAnchor>,
 ) {
-    private val anchorSnapshot = anchors.toList()
+    // The private factories transfer an owned list; callers only receive defensive snapshots.
+    private val anchorSnapshot = anchors
     val anchors: List<WarpAnchor>
         get() = anchorSnapshot.toList()
     internal val anchorCount: Int
@@ -109,49 +110,16 @@ private constructor(
             // Rounding on the global clock avoids cue-position-dependent one-frame drift.
             val endFrame = (end * rate).roundToLong()
             val outputFrames = endFrame - originFrame
-            val candidates = mutableListOf(Pair(0.0, origin), Pair(sourceEnd, end))
             // At every A beat boundary the interpolation crosses its exact paired B beat.
             val startBeat = floor(plan.first.position(origin)).toInt()
             val endBeat = ceil(plan.first.position(end)).toInt()
             require(endBeat.toLong() - startBeat <= 1_000_000) { "Unreasonable beat density" }
-            for (beat in startBeat..endBeat) {
-                checkCancellationPeriodically()
-                val out = plan.first.at(beat)
-                if (out > origin && out < end) {
-                    val src = plan.secondSourceTimeAtFirstBeat(beat)
-                    if (src > 0.0 && src < sourceEnd) candidates += Pair(src, out)
-                }
-            }
-            // Subdivide curved clock segments only when a straight map would miss by
-            // more than one millisecond. Depth limits bound memory for corrupt grids.
-            val exactKnots = candidates.sortedBy { it.first }
-            candidates.clear()
-            fun subdivide(s0: Double, t0: Double, s1: Double, t1: Double, depth: Int) {
-                checkCancellationPeriodically()
-                if (depth >= 12 || (s1 - s0) * rate < 4) return
-                var error = 0.0
-                for (fraction in doubleArrayOf(0.25, 0.5, 0.75)) {
-                    val s = s0 + (s1 - s0) * fraction
-                    val t = plan.secondOutputTime(s)
-                    error = max(error, abs(t - (t0 + (t1 - t0) * fraction)) * rate)
-                }
-                if (error <= rate * 0.001) return
-                val sm = (s0 + s1) / 2
-                val tm = plan.secondOutputTime(sm)
-                subdivide(s0, t0, sm, tm, depth + 1)
-                candidates += Pair(sm, tm)
-                subdivide(sm, tm, s1, t1, depth + 1)
-            }
-            for (i in 0 until exactKnots.lastIndex) {
-                val (s0, t0) = exactKnots[i]
-                val (s1, t1) = exactKnots[i + 1]
-                candidates += exactKnots[i]
-                subdivide(s0, t0, s1, t1, 0)
-            }
-            candidates += exactKnots.last()
-            val anchors = ArrayList<WarpAnchor>(candidates.size)
+            // Exact knots are generated in output-clock order. The source clock is monotone too,
+            // so stream each section instead of boxing and sorting a second full knot list.
+            val anchors =
+                ArrayList<WarpAnchor>((endBeat.toLong() - startBeat + 3).toInt())
             anchors += WarpAnchor(0, 0)
-            for ((src, out) in candidates.sortedBy { it.first }) {
+            fun addCandidate(src: Double, out: Double) {
                 checkCancellationPeriodically()
                 val sourceFrame = (src * rate).roundToLong()
                 val targetFrame = (out * rate).roundToLong() - originFrame
@@ -165,6 +133,42 @@ private constructor(
                     anchors += WarpAnchor(sourceFrame, targetFrame)
                 }
             }
+            // Subdivide curved clock segments only when a straight map would miss by
+            // more than one millisecond. Depth limits bound memory for corrupt grids.
+            fun subdivide(s0: Double, t0: Double, s1: Double, t1: Double, depth: Int) {
+                checkCancellationPeriodically()
+                if (depth >= 12 || (s1 - s0) * rate < 4) return
+                var error = 0.0
+                for (fraction in doubleArrayOf(0.25, 0.5, 0.75)) {
+                    val s = s0 + (s1 - s0) * fraction
+                    val t = plan.secondOutputTime(s)
+                    error = max(error, abs(t - (t0 + (t1 - t0) * fraction)) * rate)
+                }
+                if (error <= rate * 0.001) return
+                val sm = (s0 + s1) / 2
+                val tm = plan.secondOutputTime(sm)
+                subdivide(s0, t0, sm, tm, depth + 1)
+                addCandidate(sm, tm)
+                subdivide(sm, tm, s1, t1, depth + 1)
+            }
+            var previousSource = 0.0
+            var previousOutput = origin
+            fun addExact(source: Double, output: Double) {
+                addCandidate(previousSource, previousOutput)
+                subdivide(previousSource, previousOutput, source, output, 0)
+                previousSource = source
+                previousOutput = output
+            }
+            for (beat in startBeat..endBeat) {
+                checkCancellationPeriodically()
+                val output = plan.first.at(beat)
+                if (output > origin && output < end) {
+                    val source = plan.secondSourceTimeAtFirstBeat(beat)
+                    if (source > 0.0 && source < sourceEnd) addExact(source, output)
+                }
+            }
+            addExact(sourceEnd, end)
+            addCandidate(previousSource, previousOutput)
             anchors += WarpAnchor(sourceFrames, outputFrames)
             cancellationCheck()
             return WarpSchedule(rate, sourceFrames, originFrame, outputFrames, anchors)
