@@ -82,8 +82,7 @@ object PulsePhaseAudit {
         if (
             !evidence.supportsCandidate ||
                 reference.size < 2 ||
-                reference.any { !it.seconds.isFinite() } ||
-                reference.zipWithNext().any { (a, b) -> b.seconds <= a.seconds }
+                !validReference(reference, cancellationCheck)
         )
             return supported
         val referencePeriods = measuredReferencePeriods(reference, cancellationCheck)
@@ -128,11 +127,7 @@ object PulsePhaseAudit {
         val insufficient =
             PulsePhaseEvidence(PulsePhaseRelation.INSUFFICIENT, 0, 0.0, 0.0, null, 0.0, 0.0, 0.0)
         if (observed.isEmpty() || reference.size < 2) return insufficient
-        if (
-            reference.any { !it.seconds.isFinite() } ||
-                reference.zipWithNext().any { (a, b) -> b.seconds <= a.seconds }
-        )
-            return insufficient
+        if (!validReference(reference, cancellationCheck)) return insufficient
 
         data class Observation(
             val seconds: Double,
@@ -378,6 +373,23 @@ object PulsePhaseAudit {
             if (period / localPeriod in 0.62..1.48) measured[intervalIndex] = period
         }
         return measured
+    }
+
+    /** Validate in one cancellable pass without materializing adjacent-beat pairs. */
+    private fun validReference(
+        reference: List<Beat>,
+        cancellationCheck: () -> Unit,
+    ): Boolean {
+        var previous = Double.NEGATIVE_INFINITY
+        var index = 0
+        for (beat in reference) {
+            if (index > 0 && index % 256 == 0) cancellationCheck()
+            val seconds = beat.seconds
+            if (!seconds.isFinite() || seconds <= previous) return false
+            previous = seconds
+            index++
+        }
+        return true
     }
 
     private fun circularDistance(a: Double, b: Double): Double = abs((a - b + 1.5) % 1.0 - 0.5)
