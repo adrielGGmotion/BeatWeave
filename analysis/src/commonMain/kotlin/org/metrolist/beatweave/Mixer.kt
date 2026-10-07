@@ -269,6 +269,19 @@ data class MixPlan(
         return releaseSourceSeconds + dt + extra
     }
 
+    /** Exact fast path when the caller already has an outgoing beat index. */
+    internal fun secondSourceTimeAtFirstBeat(beat: Int): Double {
+        val outputSeconds = first.at(beat)
+        val coverage = observedCoverage
+        if (beat <= observedStartBeat)
+            return coverage.sourceStartSeconds +
+                (outputSeconds - coverage.outputStartSeconds) * slopeAt(observedStartBeat)
+        if (beat >= observedEndBeat)
+            return coverage.sourceEndSeconds +
+                (outputSeconds - coverage.outputEndSeconds) * slopeAt(observedEndBeat)
+        return pairedSource(beat)
+    }
+
     /** Analytic derivatives of the same playback clock, without subtracting nearby source times. */
     internal fun secondClockRates(outputSeconds: Double): Pair<Double, Double> {
         require(outputSeconds.isFinite()) { "Output time must be finite" }

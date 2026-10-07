@@ -45,6 +45,13 @@ class ClockEndpointTest {
         for (beat in coverage.firstStartBeat..coverage.firstEndBeat) {
             assertEquals(b.at(beat - 2), plan.secondSourceTime(a.at(beat)), 1e-12)
         }
+        for (beat in -100..200) {
+            assertEquals(
+                plan.secondSourceTime(plan.first.at(beat)),
+                plan.secondSourceTimeAtFirstBeat(beat),
+                1e-12,
+            )
+        }
         for (index in -100..200) {
             val t = index / 10.0
             assertEquals(t, plan.secondOutputTime(plan.secondSourceTime(t)), 1e-8)
