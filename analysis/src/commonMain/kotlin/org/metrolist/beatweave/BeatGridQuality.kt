@@ -2,6 +2,8 @@ package org.metrolist.beatweave
 
 import kotlin.math.*
 
+private const val PULSE_CANCELLATION_INTERVAL = 256
+
 enum class BeatIssueSeverity {
     WARNING,
     ERROR,
@@ -36,7 +38,13 @@ object BeatGridQuality {
         beats: List<Beat>,
         referenceBeats: List<Beat>? = null,
         durationSeconds: Double? = null,
+        cancellationCheck: () -> Unit = {},
     ): BeatGridQualityReport {
+        cancellationCheck()
+        var cancellationWork = 0
+        fun checkCancellationPeriodically() {
+            if (cancellationWork++ % PULSE_CANCELLATION_INTERVAL == 0) cancellationCheck()
+        }
         val issues = ArrayList<BeatGridIssue>()
         fun error(code: String, a: Double, b: Double, message: String) {
             issues += BeatGridIssue(code, BeatIssueSeverity.ERROR, a, b, message)
@@ -57,14 +65,23 @@ object BeatGridQuality {
             )
             return BeatGridQualityReport(beats.size, 0.0, issues)
         }
-        if (
-            beats.any {
-                !it.seconds.isFinite() ||
-                    it.seconds < 0 ||
-                    !it.strength.isFinite() ||
-                    (durationSeconds != null && it.seconds >= durationSeconds)
-            } || beats.zipWithNext().any { (a, b) -> b.seconds <= a.seconds }
-        ) {
+        fun validClock(clock: List<Beat>): Boolean {
+            var previous = Double.NEGATIVE_INFINITY
+            for (beat in clock) {
+                checkCancellationPeriodically()
+                if (
+                    !beat.seconds.isFinite() ||
+                        beat.seconds < 0 ||
+                        !beat.strength.isFinite() ||
+                        (durationSeconds != null && beat.seconds >= durationSeconds) ||
+                        beat.seconds <= previous
+                )
+                    return false
+                previous = beat.seconds
+            }
+            return true
+        }
+        if (!validClock(beats)) {
             error(
                 "INVALID_TIMESTAMPS",
                 0.0,
@@ -75,13 +92,7 @@ object BeatGridQuality {
         }
         if (
             referenceBeats != null &&
-                (referenceBeats.size < 3 ||
-                    referenceBeats.any {
-                        !it.seconds.isFinite() ||
-                            it.seconds < 0 ||
-                            !it.strength.isFinite() ||
-                            (durationSeconds != null && it.seconds >= durationSeconds)
-                    } || referenceBeats.zipWithNext().any { (a, b) -> b.seconds <= a.seconds })
+                (referenceBeats.size < 3 || !validClock(referenceBeats))
         ) {
             error(
                 "INVALID_REFERENCE_CLOCK",
@@ -91,13 +102,18 @@ object BeatGridQuality {
             )
             return BeatGridQualityReport(beats.size, 0.0, issues)
         }
-        val intervals = beats.zipWithNext { a, b -> b.seconds - a.seconds }
+        val intervals =
+            List(max(0, beats.size - 1)) { index ->
+                checkCancellationPeriodically()
+                beats[index + 1].seconds - beats[index].seconds
+            }
         val referencePeriods = referenceBeats?.let { DoubleArray(intervals.size) { Double.NaN } }
         var referenceCoverage: Double? = null
         if (referenceBeats != null && referencePeriods != null) {
             var nextReference = 1
             var coveredIntervals = 0
             for (index in intervals.indices) {
+                checkCancellationPeriodically()
                 val midpoint = beats[index].seconds + intervals[index] / 2
                 while (
                     nextReference < referenceBeats.size &&
@@ -129,6 +145,7 @@ object BeatGridQuality {
         }
         val median = intervals.sorted().let { if (it.isEmpty()) 0.0 else it[it.size / 2] }
         for (i in intervals.indices) {
+            checkCancellationPeriodically()
             val a = beats[i].seconds
             val b = beats[i + 1].seconds
             val interval = intervals[i]
@@ -205,9 +222,20 @@ object PulseNormalizer {
         downbeatSeconds: List<Double> = emptyList(),
         activationScores: FloatArray? = null,
         activationHopSeconds: Double = 0.02,
+        cancellationCheck: () -> Unit = {},
     ): PulseNormalizationResult {
+        cancellationCheck()
+        var cancellationWork = 0
+        fun checkCancellationPeriodically() {
+            if (cancellationWork++ % PULSE_CANCELLATION_INTERVAL == 0) cancellationCheck()
+        }
         require(activationHopSeconds.isFinite() && activationHopSeconds > 0)
-        require(activationScores == null || activationScores.all { it.isFinite() && it in 0f..1f })
+        if (activationScores != null) {
+            for (score in activationScores) {
+                checkCancellationPeriodically()
+                require(score.isFinite() && score in 0f..1f)
+            }
+        }
         val repairs = ArrayList<PulseRepair>()
         val additional = ArrayList<BeatGridIssue>()
         fun reject(code: String, a: Double, b: Double, message: String) {
@@ -215,14 +243,23 @@ object PulseNormalizer {
         }
         val duration = fallback.durationSeconds
         val validDuration = duration.isFinite() && duration > 0.0
-        fun validClock(beats: List<Beat>): Boolean =
-            validDuration &&
-                beats.all {
-                it.seconds.isFinite() &&
-                    it.seconds >= 0 &&
-                    it.seconds < duration &&
-                    it.strength.isFinite()
-                } && beats.zipWithNext().all { (a, b) -> b.seconds > a.seconds }
+        fun validClock(beats: List<Beat>): Boolean {
+            if (!validDuration) return false
+            var previous = Double.NEGATIVE_INFINITY
+            for (beat in beats) {
+                checkCancellationPeriodically()
+                if (
+                    !beat.seconds.isFinite() ||
+                        beat.seconds < 0 ||
+                        beat.seconds >= duration ||
+                        !beat.strength.isFinite() ||
+                        beat.seconds <= previous
+                )
+                    return false
+                previous = beat.seconds
+            }
+            return true
+        }
         if (
             !validClock(rawBeats) ||
                 !validClock(fallback.beats) ||
@@ -235,18 +272,31 @@ object PulseNormalizer {
                 if (validDuration) duration else 0.0,
                 "Finite ordered model beats and an independent local pulse reference inside a finite recording are required",
             )
-            return result(rawBeats, rawBeats, downbeatSeconds, repairs, fallback, additional, 0.0)
+            return result(
+                rawBeats,
+                rawBeats,
+                downbeatSeconds,
+                repairs,
+                fallback,
+                additional,
+                0.0,
+                cancellationCheck,
+            )
         }
         val reference = fallback.beats
+        var agreementMeasured = 0
+        var agreementMatched = 0
+        for (index in 0 until rawBeats.lastIndex) {
+            checkCancellationPeriodically()
+            val a = rawBeats[index]
+            val b = rawBeats[index + 1]
+            val period = measuredLocalPeriod(reference, (a.seconds + b.seconds) / 2) ?: continue
+            agreementMeasured++
+            if (abs((b.seconds - a.seconds) / period - 1) < 0.22) agreementMatched++
+        }
         val agreement =
-            rawBeats
-                .zipWithNext()
-                .mapNotNull { (a, b) ->
-                    measuredLocalPeriod(reference, (a.seconds + b.seconds) / 2)?.let {
-                        abs((b.seconds - a.seconds) / it - 1) < 0.22
-                    }
-                }
-                .let { if (it.isEmpty()) 0.0 else it.count { x -> x }.toDouble() / it.size }
+            if (agreementMeasured == 0) 0.0
+            else agreementMatched.toDouble() / agreementMeasured
         if (agreement < 0.55) {
             reject(
                 "UNCONFIRMED_CANONICAL_PULSE",
@@ -262,11 +312,13 @@ object PulseNormalizer {
                 fallback,
                 additional,
                 agreement,
+                cancellationCheck,
             )
         }
         val cleaned = rawBeats.toMutableList()
         var i = 0
         while (i < cleaned.size - 1) {
+            checkCancellationPeriodically()
             val a = cleaned[i]
             val b = cleaned[i + 1]
             val period = measuredLocalPeriod(reference, (a.seconds + b.seconds) / 2)
@@ -297,6 +349,7 @@ object PulseNormalizer {
         // cannot anchor several new pulses. Integer gaps allow missing observations on
         // either side; strong observations are never relocated by this procedure.
         for (index in 1 until cleaned.lastIndex) {
+            checkCancellationPeriodically()
             val left = cleaned[index - 1]
             val current = cleaned[index]
             val right = cleaned[index + 1]
@@ -346,7 +399,10 @@ object PulseNormalizer {
             val kind: PulseRepairKind?,
         )
         val inserts = ArrayList<Insert>()
-        for ((left, right) in cleaned.zipWithNext()) {
+        for (index in 0 until cleaned.lastIndex) {
+            checkCancellationPeriodically()
+            val left = cleaned[index]
+            val right = cleaned[index + 1]
             val period =
                 measuredLocalPeriod(reference, (left.seconds + right.seconds) / 2) ?: continue
             val ratio = (right.seconds - left.seconds) / period
@@ -408,6 +464,7 @@ object PulseNormalizer {
         }
         val output = cleaned.toMutableList()
         for ((index, insert) in inserts.withIndex()) {
+            checkCancellationPeriodically()
             if (insert.candidate != null) {
                 val beat = insert.candidate
                 output += beat
@@ -450,10 +507,15 @@ object PulseNormalizer {
                     )
             }
         }
-        output.sortBy { it.seconds }
+        var sortWork = 0
+        output.sortWith { a, b ->
+            if (sortWork++ % (PULSE_CANCELLATION_INTERVAL * 4) == 0) cancellationCheck()
+            a.seconds.compareTo(b.seconds)
+        }
         // A weak isolated event may be a syncopation rather than the pulse. Relocation
         // requires both surrounding observations and a separate audio attack to agree.
         for (index in 1 until output.lastIndex) {
+            checkCancellationPeriodically()
             val left = output[index - 1]
             val current = output[index]
             val right = output[index + 1]
@@ -507,8 +569,22 @@ object PulseNormalizer {
                     "${repairs.size} pulse repairs are recorded; timing correctness is not guaranteed by grid geometry",
                 )
         val retainedDownbeats =
-            downbeatSeconds.filter { t -> output.any { abs(it.seconds - t) < 0.001 } }
-        return result(rawBeats, output, retainedDownbeats, repairs, fallback, additional, agreement)
+            downbeatSeconds.filter { time ->
+                output.any {
+                    checkCancellationPeriodically()
+                    abs(it.seconds - time) < 0.001
+                }
+            }
+        return result(
+            rawBeats,
+            output,
+            retainedDownbeats,
+            repairs,
+            fallback,
+            additional,
+            agreement,
+            cancellationCheck,
+        )
     }
 
     internal fun localPeriod(beats: List<Beat>, at: Double): Double? {
@@ -636,13 +712,28 @@ object PulseNormalizer {
         fallback: Analysis,
         additional: List<BeatGridIssue>,
         agreement: Double,
+        cancellationCheck: () -> Unit,
     ): PulseNormalizationResult {
-        val report = BeatGridQuality.audit(beats, fallback.beats, fallback.durationSeconds)
+        fun <T> snapshot(values: List<T>): List<T> {
+            val copy = ArrayList<T>(values.size)
+            for ((index, value) in values.withIndex()) {
+                if (index % PULSE_CANCELLATION_INTERVAL == 0) cancellationCheck()
+                copy += value
+            }
+            return copy
+        }
+        val report =
+            BeatGridQuality.audit(
+                beats,
+                fallback.beats,
+                fallback.durationSeconds,
+                cancellationCheck,
+            )
         return PulseNormalizationResult(
-            raw.toList(),
-            beats.toList(),
-            downbeats.toList(),
-            repairs.toList(),
+            snapshot(raw),
+            snapshot(beats),
+            snapshot(downbeats),
+            snapshot(repairs),
             report.copy(issues = report.issues + additional),
             agreement,
         )
