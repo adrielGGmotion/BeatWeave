@@ -266,6 +266,14 @@ fun main(args: Array<String>) {
     )
     check(cache.listFiles().orEmpty().isEmpty())
     println("PASS owned native cache cleanup and idempotent close")
+    val extractedNativeLibraries =
+        File(System.getProperty("java.io.tmpdir")).listFiles().orEmpty().filter {
+            it.name.startsWith("beatweave-rubberband-") && it.name.endsWith(".so")
+        }
+    check(extractedNativeLibraries.isEmpty()) {
+        "Bundled JVM native extraction remained until process exit: $extractedNativeLibraries"
+    }
+    println("PASS bundled JVM native extraction is unlinked after loading")
     println(
         "PASS published JVM integration: ${System.getProperty("beatweave.version", "unspecified")}, no repository source-module dependency"
     )

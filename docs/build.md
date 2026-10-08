@@ -75,7 +75,9 @@ repositories {
 The Android Rubber Band AAR contains libraries for `arm64-v8a`, `armeabi-v7a`,
 and `x86_64`. The JVM JAR bundles its Linux x86_64 native library. Publication
 therefore requires a Linux x86_64 build host. JVM consumers load that library
-automatically; no separate native build or `java.library.path` is needed.
+automatically; no separate native build or `java.library.path` is needed. The JVM
+loader unlinks its temporary extracted copy immediately after Linux loads it,
+with process-exit deletion retained only as a fallback if the filesystem refuses.
 For development, `-PbeatweaveNativeLibraryPath=/path/to/native` still selects a
 prebuilt library for module tests. A JVM `java.library.path` override takes
 precedence over the bundled resource.
