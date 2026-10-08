@@ -137,10 +137,14 @@ class RubberBandEngine(private val cacheDirectory: File) : PitchShiftEngine {
                 RandomAccessFile(outputFile, "rw").use { destination ->
                     var nativeFrames = 0L
                     var writtenFrames = 0L
-                    fun drain() {
+                    fun drain(progressValue: Double) {
                         while (true) {
                             val available = RubberBandBridge.available(handle)
                             if (available <= 0) return
+                            // Retrieval can expose many output blocks after one native process
+                            // call, especially at the end of an offline stretch. Keep cancellation
+                            // responsive without making the reported progress move backwards.
+                            update(progressValue)
                             val count =
                                 RubberBandBridge.retrieve(handle, pcm, min(available, block))
                             check(count > 0) { "Native engine stalled while draining output" }
@@ -159,7 +163,9 @@ class RubberBandEngine(private val cacheDirectory: File) : PitchShiftEngine {
                     }
                     frame = 0L
                     while (frame < schedule.sourceFrames) {
-                        update(0.45 + 0.54 * frame.toDouble() / schedule.sourceFrames)
+                        val renderProgress =
+                            0.45 + 0.54 * frame.toDouble() / schedule.sourceFrames
+                        update(renderProgress)
                         // R3 updates a keyframe-map ratio once per process call.
                         // Large (4096-frame) calls delayed variable-tempo updates and
                         // attenuated one transient by 13 dB in the 120-second drift
@@ -176,10 +182,10 @@ class RubberBandEngine(private val cacheDirectory: File) : PitchShiftEngine {
                             count,
                             frame + count == schedule.sourceFrames,
                         )
-                        drain()
+                        drain(renderProgress)
                         frame += count
                     }
-                    drain()
+                    drain(0.99)
                     check(RubberBandBridge.available(handle) == -1) {
                         "Native engine did not finish offline processing"
                     }
