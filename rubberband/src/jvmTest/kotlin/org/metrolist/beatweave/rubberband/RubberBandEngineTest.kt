@@ -158,6 +158,26 @@ class RubberBandEngineTest {
     }
 
     @Test
+    fun cancellingNativeDrainDeletesPartialFiles() = withCache { cache ->
+        val source = source()
+        var previousProgress = -1.0
+        assertFailsWith<MixCancelledException> {
+            RubberBandEngine(cache).prepare(
+                source,
+                WarpSchedule.from(plan(1.02), source.durationSeconds),
+            ) { progress ->
+                if (progress in 0.45..<1.0 && progress == previousProgress) {
+                    throw MixCancelledException()
+                }
+                previousProgress = progress
+            }
+        }
+        // Before drain polling, render progress advanced only with input blocks and this
+        // cancellation request was never observed while native output was being retrieved.
+        assertTrue(cache.listFiles()!!.isEmpty())
+    }
+
+    @Test
     fun invalidDecoderPcmFailsBeforeBecomingAPlayableResult() = withCache { cache ->
         val source = source(true)
         assertFailsWith<IllegalArgumentException> {

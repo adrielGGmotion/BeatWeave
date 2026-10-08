@@ -157,7 +157,8 @@ accuracy, and rejection does not establish that a transition would sound bad.
 - Nonzero pitch shifting uses offline Rubber Band R3 with linked stereo and
   optional formant preservation. It is not lossless and can introduce artifacts,
   especially at large shifts. Synthetic tone and stereo regressions do not
-  establish transparent quality on arbitrary recordings.
+  establish transparent quality on arbitrary recordings. Offline output draining
+  polls cancellation before every block of at most 4,096 retrieved frames.
 - BPM, key and meter are estimates. Key chroma compensates for a consistent global tuning offset,
   and key confidence separates the selected harmonic family from incompatible profiles rather
   than claiming an exact-mode probability; low-confidence full mixes and local or changing tuning
