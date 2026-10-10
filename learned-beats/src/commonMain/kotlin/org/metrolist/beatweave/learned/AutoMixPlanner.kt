@@ -829,6 +829,7 @@ object AutoMixPlanner {
         qualityLimits: WarpQualityLimits,
         isCancelled: () -> Boolean,
         selection: AutoMixSelection? = null,
+        inheritedOutgoingBars: Set<Int> = emptySet(),
     ): LocalMixPlan {
         require(
             a.beats.times.contentEquals(first.pulse.beats.map { it.seconds }.toDoubleArray()) &&
@@ -839,16 +840,13 @@ object AutoMixPlanner {
         require(sameBars(a, b, outgoing, incoming, bars)) {
             "Every corresponding bar must contain the same number of canonical pulses"
         }
-        first.barTracking?.requireUsable(outgoing, bars)
+        TransitionEvidence.requireBars(first, a, outgoing, bars, inheritedOutgoingBars, isCancelled)
         second.barTracking?.requireUsable(incoming, bars)
         // Independently check each bar even for caller-assembled analyses. A
         // quiet/unsupported bar cannot borrow activity from its louder neighbor.
         for (index in 0 until bars) {
             if (isCancelled()) throw MixCancelledException()
-            first.requirePulseRange(
-                a.boundary(outgoing + index),
-                a.boundary(outgoing + index + 1) + 1,
-            )
+            // Outgoing evidence was checked above, including any explicitly inherited tail.
             second.requirePulseRange(
                 b.boundary(incoming + index),
                 b.boundary(incoming + index + 1) + 1,
@@ -861,7 +859,10 @@ object AutoMixPlanner {
         require(fitOptions.pinnedIncomingBeats.all { it in bStart..bEnd }) {
             "Pinned incoming canonical beat lies outside the selected bar range"
         }
-        val firstGrid = first.matchingGrid(aStart, aEnd + 1)
+        first.requirePulseGeometryRange(aStart, aEnd + 1)
+        val directlySupportedEnd = inheritedOutgoingBars.minOrNull()?.let { a.boundary(it) } ?: aEnd
+        if (directlySupportedEnd > aStart) first.requirePulseRange(aStart, directlySupportedEnd + 1)
+        val firstGrid = BeatGrid(a.beats.times.copyOfRange(aStart, aEnd + 1))
         val secondGrid = second.matchingGrid(bStart, bEnd + 1)
         require(
             first.audio.durationSeconds.isFinite() &&
@@ -937,6 +938,9 @@ object AutoMixPlanner {
             second.audio.durationSeconds,
             matched,
             selection,
+            transitionAlignment = if (inheritedOutgoingBars.isEmpty()) null else
+                TransitionPulseAlignment(aStart, aEnd, bStart, bEnd.toDouble(), 1, 1,
+                    inheritedOutgoingBars.sorted()),
         )
     }
 

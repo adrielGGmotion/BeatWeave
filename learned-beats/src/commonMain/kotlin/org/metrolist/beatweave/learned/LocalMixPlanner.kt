@@ -77,6 +77,8 @@ internal constructor(
     val automaticSelection: AutoMixSelection? = null,
     val beatCoverage: BeatOverlapCoverage? = null,
     val declaredMainSelection: DeclaredMainBeatSelection? = null,
+    /** Present for pulse-aligned transitions or an explicitly inherited outgoing tail. */
+    val transitionAlignment: TransitionPulseAlignment? = null,
 ) {
     val mixPlan: MixPlan = clockFit.requireAccepted()
 
@@ -115,7 +117,8 @@ internal constructor(
 /**
  * The automatic integration entry point: audit pulse and selected-bar evidence, refine only when
  * necessary, and validate the complete prepared clock. A declined fit throws a typed exception; it
- * never silently changes BPM, meter, phase, pitch or acceptance limits to force a render.
+ * never relaxes acceptance limits to force a render. Explicit transitions may pair differing
+ * bar pulses and use an observed octave ratio; the selected source clocks and entry phase stay intact.
  * Bar operations take [ClockFitOptions.pinnedIncomingBeats] in the original incoming canonical
  * clock and require the selected range to contain every pin; they remap onto the prepared grid.
  */
@@ -479,6 +482,10 @@ object LocalMixPlanner {
         )
     }
 
+    /**
+     * Exact outgoing-bar fade. Compatible bars retain their original plan; differing bars align
+     * pulses from the entry downbeats. Only entry bar alignment is promised on that path.
+     */
     fun transition(
         first: LocalSongAnalysis,
         second: LocalSongAnalysis,
@@ -489,26 +496,31 @@ object LocalMixPlanner {
         fitOptions: ClockFitOptions = ClockFitOptions(),
         qualityLimits: WarpQualityLimits = WarpQualityLimits(),
         isCancelled: () -> Boolean = { false },
+    ): LocalMixPlan = transition(
+        first, second, outgoingStartBar, incomingStartBar, outgoingBars, outputSampleRate,
+        fitOptions, qualityLimits, LocalTransitionOptions(), isCancelled,
+    )
+
+    /** Explicit options; the original overload remains available to existing binaries/callers. */
+    fun transition(
+        first: LocalSongAnalysis,
+        second: LocalSongAnalysis,
+        outgoingStartBar: Int,
+        incomingStartBar: Int,
+        outgoingBars: Int = 16,
+        outputSampleRate: Int = 48000,
+        fitOptions: ClockFitOptions = ClockFitOptions(),
+        qualityLimits: WarpQualityLimits = WarpQualityLimits(),
+        options: LocalTransitionOptions,
+        isCancelled: () -> Boolean = { false },
     ): LocalMixPlan {
         if (isCancelled()) throw MixCancelledException()
         require(outgoingBars in TransitionPlanner.supportedBarCounts) {
             "Choose 2, 4, 8, 16 or 32 bars"
         }
-        val a = first.barTracking?.grid() ?: first.bars()
-        val b = second.barTracking?.grid() ?: second.bars()
-        return AutoMixPlanner.scopedPlan(
-            first,
-            second,
-            a,
-            b,
-            outgoingStartBar,
-            incomingStartBar,
-            outgoingBars,
-            MixMode.TRANSITION,
-            outputSampleRate,
-            fitOptions,
-            qualityLimits,
-            isCancelled,
+        return PulseTransitionPlanner.transition(
+            first, second, outgoingStartBar, incomingStartBar, outgoingBars, outputSampleRate,
+            fitOptions, qualityLimits, options, isCancelled,
         )
     }
 }

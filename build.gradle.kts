@@ -102,7 +102,7 @@ tasks.register<Zip>("modelDistribution") {
     isPreserveFileTimestamps = false
     isReproducibleFileOrder = true
     from("learned-beats/models") {
-        include("*.onnx", "*provenance.json")
+        include("*.onnx", "*provenance.json", "distribution.json")
         into("learned-beats/models")
     }
     from("learned-beats/licenses") { into("learned-beats/licenses") }

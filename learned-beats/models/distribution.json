@@ -1,0 +1,7 @@
+{
+  "library_version": "0.11.0",
+  "weights_changed": false,
+  "weights_source_release": "v0.10.0",
+  "planner_policy": "entry-downbeat-pulse-alignment-v1",
+  "note": "Pulse-count compatibility and outgoing evidence policy are library changes. Model identities and ONNX checksums remain unchanged."
+}

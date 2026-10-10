@@ -23,7 +23,7 @@ For a model-free bundled-native check, run from the repository root:
 ```
 
 For a separate consumer build, use `../../gradlew` from this directory.
-`beatweaveRoot` defaults to `../..`; `beatweaveVersion` defaults to `0.10.0`.
+`beatweaveRoot` defaults to `../..`; `beatweaveVersion` defaults to `0.11.0`.
 `beatweaveGroup` defaults to `io.github.adrielggmotion.beatweave`. Pass matching
 overrides when publishing under different coordinates. The JVM JAR bundles the Linux
 x86_64 (glibc) native library; no external native path is needed.

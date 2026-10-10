@@ -184,8 +184,12 @@ timbre and loudness gates still have to pass. Global key estimates can be wrong,
 this relationship does not prove that two passages are harmonically compatible.
 `automaticSelection.musicalCueEvidence` reports the measured cue score and
 long-blend inputs when available; `automaticSelection.policy` indicates the
-fallback. Explicit bar indices are zero-based. Every corresponding bar must contain
-the same number of canonical pulses, including any matched meter changes.
+fallback. Explicit bar indices are zero-based. Automatic searches require equal
+corresponding bar pulse counts. From 0.11.0, explicit `LocalMixPlanner.transition`
+preserves that plan when compatible and otherwise pairs pulses from the entry
+downbeats, with observed octave correction when appropriate. It retains the exact
+outgoing fade length; the incoming endpoint may fall within a bar. See
+[pulse alignment, coverage queries and rejection meanings](transition-rejections.md).
 
 For `LocalMixPlanner` and `AutoMixPlanner` bar operations,
 `ClockFitOptions.pinnedIncomingBeats` uses original incoming `pulse.beats` indices.

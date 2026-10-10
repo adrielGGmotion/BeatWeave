@@ -8,11 +8,11 @@ training data may have separate terms. Inference runs locally with ONNX Runtime;
 applications supply the model bytes and the library never downloads them.
 
 The ONNX files are distributed separately from the source. Download
-[`BeatWeave-models-0.10.0.zip`](https://github.com/adrielGGmotion/BeatWeave/releases/download/v0.10.0/BeatWeave-models-0.10.0.zip),
+[`BeatWeave-models-0.11.0.zip`](https://github.com/adrielGGmotion/BeatWeave/releases/download/v0.11.0/BeatWeave-models-0.11.0.zip),
 extract it from the repository root, then check the files:
 
 ```sh
-unzip /path/to/BeatWeave-models-0.10.0.zip
+unzip /path/to/BeatWeave-models-0.11.0.zip
 python3 tools/check-models.py
 ```
 
@@ -24,6 +24,12 @@ python3 tools/check-models.py
 The backend recognizes each variant by its checksum. `small0` is smaller;
 `final0` has different accuracy and memory costs. Neither variant guarantees
 correct bars. See [measured accuracy](accuracy.md) before choosing a default.
+
+The 0.11.0 bundle refreshes library/policy metadata (`distribution.json`) and keeps
+both ONNX files byte-for-byte identical to 0.10.0. Pulse-count compatibility and
+sparse-outro handling are planner changes, not a retraining of Beat This!.
+Existing checksum-verified model files remain compatible; update the library
+and its version in analysis-cache keys to get the new behavior.
 
 Package one model as an Android asset or load it from a local desktop file.
 Weights are not embedded in the library AAR or JAR. Release maintainers can run

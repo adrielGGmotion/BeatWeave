@@ -16,6 +16,13 @@ def main() -> int:
     )
     args = parser.parse_args()
     provenance_root = Path(__file__).resolve().parents[1] / "learned-beats/models"
+    distribution = json.loads((provenance_root / "distribution.json").read_text())
+    properties = dict(line.split("=", 1) for line in
+                      (provenance_root.parents[1] / "gradle.properties").read_text().splitlines()
+                      if "=" in line and not line.startswith("#"))
+    if distribution["library_version"] != properties["beatweaveVersion"]:
+        print("Model distribution metadata does not match the configured library version")
+        return 1
     variants = ("small0", "final0") if args.variant == "both" else (args.variant,)
     failed = False
     for variant in variants:

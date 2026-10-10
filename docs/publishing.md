@@ -36,6 +36,12 @@ models installed, `./gradlew modelDistribution` creates
 that archive to the matching public repository release before announcing Maven
 coordinates. See [model setup](models.md).
 
+The model-source release workflow runs after a successful default-branch Build.
+For a version without an existing GitHub release, it verifies the unchanged model
+weights, runs inference tests, packages models and creates a source/model
+prerelease with a SHA-256 sidecar. It requires version-specific notes under
+`docs/releases/`. It does not publish Maven Central or access signing credentials.
+
 ## Account and metadata
 
 1. Use a [Central Portal account](https://central.sonatype.com/) with access to
@@ -48,7 +54,7 @@ coordinates. See [model setup](models.md).
    `https://github.com/adrielGGmotion/BeatWeave`; `beatweaveRepositoryUrl` is
    already configured to this URL.
 5. The release group and version are configured in `gradle.properties` as
-   `io.github.adrielggmotion.beatweave` and `0.10.0`. Override them with
+   `io.github.adrielggmotion.beatweave` and `0.11.0`. Override them with
    `-PbeatweaveGroup=... -PbeatweaveVersion=...` only when needed. Project
    properties take precedence over environment variables. Versions already
    released on Central are immutable.
@@ -139,4 +145,4 @@ Snapshot versions have different Portal behavior and are not this release flow.
 After publishing a new version, verify that its artifacts are publicly available
 from Maven Central before announcing it. Consumers use `mavenCentral()` with the
 released coordinates; local repositories are only needed for development builds.
-No automatic publishing workflow or credentials are stored in this repository.
+No automatic Central publishing workflow or Central credentials are stored in this repository.

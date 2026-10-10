@@ -698,11 +698,19 @@ class AutoMixPlannerTest {
     }
 
     @Test
-    fun allInteriorBarBoundariesMustMatchEvenWhenTotalPulsesMatch() {
+    fun explicitPulseAlignmentAllowsDifferentInteriorBarsWhileAutomaticSearchRemainsStrict() {
         val a = song(List(4) { 3 } + List(4) { 5 }).copy(barTracking = null)
         val b = song(List(8) { 4 }).copy(barTracking = null)
         assertEquals(a.pulse.beats.size, b.pulse.beats.size)
-        assertFailsWith<IllegalArgumentException> { LocalMixPlanner.transition(a, b, 0, 0, 8) }
+        val explicit = LocalMixPlanner.transition(a, b, 0, 0, 8)
+        assertTrue(explicit.clockFit.report.accepted)
+        assertEquals(32, explicit.mixPlan.crossfadeBeats)
+        assertEquals(1, explicit.barMatches.size)
+        assertNotNull(explicit.transitionAlignment)
+        assertFailsWith<IllegalArgumentException> {
+            LocalMixPlanner.transition(a, b, 0, 0, 8,
+                options = LocalTransitionOptions(allowDifferentPulseCounts = false))
+        }
         val mismatch =
             assertFailsWith<AutoMixPlanningException> {
                 AutoMixPlanner.transition(song(List(12) { 3 }), song(List(12) { 4 }), 4)

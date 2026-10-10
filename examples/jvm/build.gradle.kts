@@ -1,7 +1,7 @@
 import java.security.MessageDigest
 plugins { kotlin("jvm") version "2.1.21"; application }
 val beatweaveRoot = file(providers.gradleProperty("beatweaveRoot").orElse("../..").get())
-val beatweaveVersion = providers.gradleProperty("beatweaveVersion").orElse("0.10.0").get()
+val beatweaveVersion = providers.gradleProperty("beatweaveVersion").orElse("0.11.0").get()
 val beatweaveGroup = providers.gradleProperty("beatweaveGroup").orElse("io.github.adrielggmotion.beatweave").get()
 repositories {
     maven { url = uri(beatweaveRoot.resolve("dist/maven")) }

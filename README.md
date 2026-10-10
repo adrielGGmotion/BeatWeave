@@ -11,8 +11,9 @@ audio decoding, playback and UI.
 Version **0.10.0 is a development release**. Automatic bar selection still accepts
 some incorrect interpretations and rejects some usable transitions. See
 [accuracy and limitations](docs/accuracy.md) before using it for unattended automix.
-The source checkout contains unreleased cue-ranking and pitch APIs; the 0.10.0
-Maven packages do not include them.
+The 0.11.0 source adds pulse-compatible explicit transitions, outgoing coverage
+queries, cue ranking and pitch APIs. The published 0.10.0 Maven packages do not
+include these changes; build 0.11.0 locally until it is published to Central.
 
 ## Modules
 
@@ -62,6 +63,8 @@ val overlap = LocalMixPlanner.overlap(firstAnalysis, secondAnalysis)
 ```
 
 Transitions support 2, 4, 8, 16 or 32 bars, with automatic or explicit cue selection.
+In 0.11.0, explicit transitions can pair songs with different bar pulse counts.
+See [pulse alignment, sparse outros and rejection messages](docs/transition-rejections.md).
 An overlap retains both recordings and matches their selected common span.
 Preparation uses a continuous stretcher; playback, seeking and export reuse its
 prepared audio. See [usage](docs/usage.md) for analysis, rendering and error handling.
