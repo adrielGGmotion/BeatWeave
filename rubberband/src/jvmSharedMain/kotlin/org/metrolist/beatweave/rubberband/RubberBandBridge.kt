@@ -36,11 +36,13 @@ internal object RubberBandBridge {
             resource.use { input ->
                 Files.newOutputStream(file).use { input.copyTo(it) }
             }
-            file.toFile().deleteOnExit()
             System.load(file.toAbsolutePath().toString())
-        } catch (error: Throwable) {
-            file.toFile().delete()
-            throw error
+        } finally {
+            // Linux keeps the loaded inode alive after unlinking it. Remove the extracted copy
+            // immediately so an abnormal JVM exit cannot leave one native binary per process.
+            // Retain the old exit-time cleanup as a fallback for an unusual filesystem failure.
+            val extracted = file.toFile()
+            if (!extracted.delete() && extracted.exists()) extracted.deleteOnExit()
         }
     }
 
