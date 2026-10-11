@@ -3,6 +3,7 @@ package org.metrolist.beatweave.rubberband
 
 import java.io.File
 import java.io.IOException
+import java.io.RandomAccessFile
 import java.nio.file.Files
 import kotlin.math.PI
 import kotlin.math.sin
@@ -276,6 +277,42 @@ class RubberBandEngineTest {
         prepared.close()
         assertTrue(cache.listFiles()!!.isEmpty())
     }
+
+    @Test
+    fun preparedConstructionFailureClosesInputBeforeDeletingUnreachableCache() =
+        withCache { cache ->
+            val engine = RubberBandEngine(cache)
+            var opened = 0
+            var closed = 0
+            engine.openPreparedInput = { file ->
+                opened++
+                object : RandomAccessFile(file, "r") {
+                    override fun close() {
+                        closed++
+                        super.close()
+                    }
+                }
+            }
+            engine.beforePreparedOwnershipTransfer = {
+                throw IOException("injected prepared-result construction failure")
+            }
+            engine.deleteFile = { file ->
+                assertEquals(1, closed, "Prepared input must close before cache deletion")
+                file.delete()
+            }
+
+            val failure = assertFailsWith<IOException> {
+                engine.prepare(
+                    source(),
+                    WarpSchedule.from(plan(), source().durationSeconds),
+                ) {}
+            }
+
+            assertEquals("injected prepared-result construction failure", failure.message)
+            assertEquals(1, opened)
+            assertEquals(1, closed)
+            assertTrue(cache.listFiles()!!.isEmpty())
+        }
 
     @Test
     fun emptyNativeRenderCannotBecomeOnePaddedSample() = withCache { cache ->
