@@ -268,13 +268,15 @@ object LocalMixPlanner {
         qualityLimits: WarpQualityLimits = WarpQualityLimits(),
         isCancelled: () -> Boolean = { false },
     ): LocalMixPlan {
-        if (isCancelled()) throw MixCancelledException()
+        fun checkCancellation() { if (isCancelled()) throw MixCancelledException() }
+        checkCancellation()
         require(outputSampleRate in 22050..96000)
         val a = observedGrid(first)
         val b = observedGrid(second)
         val firstCue = outgoingCueBeat ?: defaultCue(first, a, isCancelled)
         val secondCue = incomingCueBeat ?: defaultCue(second, b, isCancelled)
-        if (!supportedCue(first, firstCue) || !supportedCue(second, secondCue))
+        if (!supportedCue(first, firstCue, isCancelled) ||
+            !supportedCue(second, secondCue, isCancelled))
             throw BeatOverlapPlanningException(
                 BeatOverlapFailureCode.NO_SUPPORTED_CUE,
                 "Both cues must lie inside an accepted pulse region",
@@ -307,8 +309,8 @@ object LocalMixPlanner {
             )
         // Geometry errors remain fatal across the ORIGINAL paired span, even at its edges.
         try {
-            first.requirePulseGeometryRange(aStart, aEnd + 1)
-            second.requirePulseGeometryRange(bStart, bEnd + 1)
+            first.requirePulseGeometryRange(aStart, aEnd + 1, ::checkCancellation)
+            second.requirePulseGeometryRange(bStart, bEnd + 1, ::checkCancellation)
         } catch (_: IllegalArgumentException) {
             throw BeatOverlapPlanningException(
                 BeatOverlapFailureCode.UNSUPPORTED_SHARED_COVERAGE,
@@ -362,8 +364,8 @@ object LocalMixPlanner {
                         )
                 )
         try {
-            first.requirePulseRange(matchedAStart, matchedAEnd + 1)
-            second.requirePulseRange(matchedBStart, matchedBEnd + 1)
+            first.requirePulseRange(matchedAStart, matchedAEnd + 1, ::checkCancellation)
+            second.requirePulseRange(matchedBStart, matchedBEnd + 1, ::checkCancellation)
         } catch (_: IllegalArgumentException) {
             throw BeatOverlapPlanningException(
                 BeatOverlapFailureCode.UNSUPPORTED_SHARED_COVERAGE,
@@ -371,9 +373,9 @@ object LocalMixPlanner {
                 coverage,
             )
         }
-        if (isCancelled()) throw MixCancelledException()
-        val firstClock = first.matchingGrid(matchedAStart, matchedAEnd + 1)
-        val secondClock = second.matchingGrid(matchedBStart, matchedBEnd + 1)
+        checkCancellation()
+        val firstClock = first.matchingGrid(matchedAStart, matchedAEnd + 1, ::checkCancellation)
+        val secondClock = second.matchingGrid(matchedBStart, matchedBEnd + 1, ::checkCancellation)
         val plan =
             MixPlan(
                 firstClock,
@@ -449,11 +451,17 @@ object LocalMixPlanner {
         return BeatGrid(song.pulse.beats.map { it.seconds }.toDoubleArray())
     }
 
-    private fun supportedCue(song: LocalSongAnalysis, beat: Int): Boolean {
+    private fun supportedCue(
+        song: LocalSongAnalysis,
+        beat: Int,
+        isCancelled: () -> Boolean,
+    ): Boolean {
         if (beat !in song.pulse.beats.indices || song.pulse.beats.size < 2) return false
         val start = min(beat, song.pulse.beats.lastIndex - 1)
         return try {
-            song.requirePulseRange(start, start + 2)
+            song.requirePulseRange(start, start + 2) {
+                if (isCancelled()) throw MixCancelledException()
+            }
             true
         } catch (_: IllegalArgumentException) {
             false
@@ -469,12 +477,13 @@ object LocalMixPlanner {
             if (isCancelled()) throw MixCancelledException()
             if (!downbeat.isFinite()) continue
             val nearest = grid.position(downbeat).roundToInt().coerceIn(0, grid.size - 1)
-            if (abs(grid.at(nearest) - downbeat) <= 0.07 && supportedCue(song, nearest))
+            if (abs(grid.at(nearest) - downbeat) <= 0.07 &&
+                supportedCue(song, nearest, isCancelled))
                 return nearest
         }
         for (beat in 0 until grid.size) {
             if (isCancelled()) throw MixCancelledException()
-            if (supportedCue(song, beat)) return beat
+            if (supportedCue(song, beat, isCancelled)) return beat
         }
         throw BeatOverlapPlanningException(
             BeatOverlapFailureCode.NO_SUPPORTED_CUE,

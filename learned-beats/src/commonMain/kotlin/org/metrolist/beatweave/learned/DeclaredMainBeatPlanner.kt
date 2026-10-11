@@ -157,7 +157,8 @@ internal object DeclaredMainBeatPlanner {
         cancel: () -> Boolean,
         beforeFit: () -> Unit = {},
     ): LocalMixPlan {
-        if (cancel()) throw MixCancelledException()
+        fun checkCancellation() { if (cancel()) throw MixCancelledException() }
+        checkCancellation()
         if (
             aBar < 0 ||
                 bBar < 0 ||
@@ -186,18 +187,24 @@ internal object DeclaredMainBeatPlanner {
             )
         // Unmatched canonical subdivisions remain covered by the original pulse/audio evidence.
         try {
-            first.requirePulseRange(a.canonicalIndex(af), a.canonicalIndex(ae) + 1)
-            second.requirePulseRange(b.canonicalIndex(bf), b.canonicalIndex(be) + 1)
+            first.requirePulseRange(
+                a.canonicalIndex(af), a.canonicalIndex(ae) + 1, ::checkCancellation,
+            )
+            second.requirePulseRange(
+                b.canonicalIndex(bf), b.canonicalIndex(be) + 1, ::checkCancellation,
+            )
             // A weak bar cannot borrow local attack coverage from adjacent active bars.
             for (bar in 0 until bars) {
-                if (cancel()) throw MixCancelledException()
+                checkCancellation()
                 first.requirePulseRange(
                     a.boundaryCanonicalIndex(aBar + bar),
                     a.boundaryCanonicalIndex(aBar + bar + 1) + 1,
+                    ::checkCancellation,
                 )
                 second.requirePulseRange(
                     b.boundaryCanonicalIndex(bBar + bar),
                     b.boundaryCanonicalIndex(bBar + bar + 1) + 1,
+                    ::checkCancellation,
                 )
             }
         } catch (_: IllegalArgumentException) {
