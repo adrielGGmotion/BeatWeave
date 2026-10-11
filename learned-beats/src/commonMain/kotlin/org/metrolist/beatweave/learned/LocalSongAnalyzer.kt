@@ -60,10 +60,10 @@ data class LocalSongAnalysis(
             "A pulse range requires at least two in-bounds canonical timestamps"
         }
         var supported = pulse.quality.safeForAutomaticMix
-        var index = 0
-        while (!supported && index < pulseRegions.size) {
+        val regions = pulseRegions.iterator()
+        while (!supported && regions.hasNext()) {
             cancellationCheck()
-            supported = pulseRegions[index++].contains(startBeat, endBeatExclusive)
+            supported = regions.next().contains(startBeat, endBeatExclusive)
         }
         require(supported) {
             "Requested pulse range crosses uncertain or rejected beat evidence"
