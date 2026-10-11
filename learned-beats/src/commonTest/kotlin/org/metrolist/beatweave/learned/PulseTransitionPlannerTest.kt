@@ -158,6 +158,36 @@ class PulseTransitionPlannerTest {
         assertFailsWith<MixCancelledException> { song().transitionCoverage { true } }
     }
 
+    @Test
+    fun rejectedPulseCoverageStopsBeforeReadingEveryRegionAfterCancellation() {
+        val base = song()
+        val accepted = AcceptedPulseRegion(0, base.pulse.beats.size,
+            base.pulse.beats.first().seconds, base.pulse.beats.last().seconds,
+            base.pulse.quality)
+        var reads = 0
+        val regions = object : AbstractList<AcceptedPulseRegion>() {
+            override val size: Int = 50_000
+            override fun get(index: Int): AcceptedPulseRegion {
+                reads++
+                return accepted
+            }
+        }
+        val rejected = base.copy(
+            pulse = base.pulse.copy(quality = base.pulse.quality.copy(issues = listOf(
+                BeatGridIssue("UNSUPPORTED_OUTRO", BeatIssueSeverity.ERROR, 0.0,
+                    base.audio.durationSeconds, "full-track pulse is unsafe")))),
+            pulseRegions = regions,
+        )
+        var checks = 0
+        assertFailsWith<MixCancelledException> {
+            rejected.latestAcceptedPulseBeat {
+                checks++
+                if (checks == 3) throw MixCancelledException()
+            }
+        }
+        assertEquals(2, reads)
+    }
+
     private fun rejectedOutro(base: LocalSongAnalysis, lastAcceptedBeat: Int): LocalSongAnalysis {
         val accepted = base.pulse.beats.take(lastAcceptedBeat + 1)
         return base.copy(pulse = base.pulse.copy(quality = base.pulse.quality.copy(issues = listOf(
