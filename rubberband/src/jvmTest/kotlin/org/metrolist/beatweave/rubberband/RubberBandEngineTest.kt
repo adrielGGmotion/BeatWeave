@@ -315,6 +315,47 @@ class RubberBandEngineTest {
         }
 
     @Test
+    fun preparedConstructionRetriesTransientInputCloseFailureBeforeDeletingCache() =
+        withCache { cache ->
+            val engine = RubberBandEngine(cache)
+            var closeAttempts = 0
+            var successfulCloses = 0
+            engine.openPreparedInput = { file ->
+                object : RandomAccessFile(file, "r") {
+                    override fun close() {
+                        closeAttempts++
+                        if (closeAttempts == 1)
+                            throw IOException("injected prepared-input close failure")
+                        successfulCloses++
+                        super.close()
+                    }
+                }
+            }
+            engine.beforePreparedOwnershipTransfer = {
+                throw IOException("injected prepared-result construction failure")
+            }
+            engine.deleteFile = { file ->
+                assertEquals(2, closeAttempts, "Prepared input close must be retried")
+                assertEquals(1, successfulCloses, "Prepared input must close before deletion")
+                file.delete()
+            }
+
+            val failure = assertFailsWith<IOException> {
+                engine.prepare(
+                    source(),
+                    WarpSchedule.from(plan(), source().durationSeconds),
+                ) {}
+            }
+
+            assertEquals("injected prepared-result construction failure", failure.message)
+            val closeFailure = assertIs<IOException>(failure.suppressedExceptions.single())
+            assertEquals("injected prepared-input close failure", closeFailure.message)
+            assertEquals(2, closeAttempts)
+            assertEquals(1, successfulCloses)
+            assertTrue(cache.listFiles()!!.isEmpty())
+        }
+
+    @Test
     fun emptyNativeRenderCannotBecomeOnePaddedSample() = withCache { cache ->
         val tiny = object : StereoPcm {
             override val durationSeconds = 2.0 / rate
