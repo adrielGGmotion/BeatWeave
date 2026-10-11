@@ -356,14 +356,13 @@ class AutoMixPlannerTest {
         val duration = base.audio.durationSeconds
         val coarseBlocks =
             listOf(
-                EnergyBlock(0.0, 3.0, -24.0),
-                EnergyBlock(3.0, 6.0, -24.0),
+                EnergyBlock(0.0, 6.0, -24.0),
                 EnergyBlock(6.0, 10.0, -24.0),
                 EnergyBlock(10.0, duration, -6.0),
             )
         val loudBlockDuration = (duration - 10.0) / 4.0
         val segmentedBlocks =
-            coarseBlocks.take(3) +
+            coarseBlocks.take(2) +
                 List(4) { index ->
                     EnergyBlock(
                         10.0 + index * loudBlockDuration,
@@ -375,9 +374,13 @@ class AutoMixPlannerTest {
         val segmented = base.audio.copy(energyBlocks = segmentedBlocks)
         val grid = base.barTracking!!.grid()
 
-        val coarsePart = MusicalCueRanking(coarse, coarse).incoming(grid, start = 1, bars = 2)
+        val coarseRanking = MusicalCueRanking(coarse, coarse)
+        val segmentedRanking = MusicalCueRanking(segmented, segmented)
+        assertTrue(coarseRanking.available)
+        assertTrue(segmentedRanking.available)
+        val coarsePart = coarseRanking.incoming(grid, start = 1, bars = 2)
         val segmentedPart =
-            MusicalCueRanking(segmented, segmented).incoming(grid, start = 1, bars = 2)
+            segmentedRanking.incoming(grid, start = 1, bars = 2)
 
         assertEquals(coarsePart, segmentedPart)
     }
