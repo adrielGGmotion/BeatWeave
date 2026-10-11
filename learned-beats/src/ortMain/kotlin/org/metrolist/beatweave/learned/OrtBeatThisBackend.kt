@@ -59,7 +59,7 @@ class OrtBeatThisBackend(modelBytes: ByteArray, threads: Int = 2) :
             sessionOptions.setMemoryPatternOptimization(false)
             session = environment.createSession(modelBytes, sessionOptions)
         } catch (failure: Throwable) {
-            sessionOptions.close()
+            collectResourceCleanupFailure(failure, sessionOptions::close)
             throw failure
         }
         try {
@@ -68,11 +68,7 @@ class OrtBeatThisBackend(modelBytes: ByteArray, threads: Int = 2) :
                 "Unexpected model output names"
             }
         } catch (failure: Throwable) {
-            try {
-                session.close()
-            } finally {
-                sessionOptions.close()
-            }
+            collectResourceCleanupFailure(failure, session::close, sessionOptions::close)
             throw failure
         }
     }
@@ -93,11 +89,16 @@ class OrtBeatThisBackend(modelBytes: ByteArray, threads: Int = 2) :
         check(!closed) { "BeatThisBackend is closed" }
         validateInput(logMel, frames)
         cancellationCheck()
-        val runOptions = OrtSession.RunOptions()
         val completed = AtomicBoolean(false)
         val cancellation = AtomicReference<Throwable?>(null)
-        val watcher =
-            Thread {
+        val runOptions = OrtSession.RunOptions()
+        var watcher: Thread? = null
+        var watcherStarted = false
+        var result: BeatThisLogits? = null
+        var inferenceFailure: Throwable? = null
+        var completionFailure: Throwable? = null
+        try {
+            val activeWatcher = Thread {
                 while (!completed.get()) {
                     LockSupport.parkNanos(CANCELLATION_POLL_NANOS)
                     if (completed.get()) break
@@ -115,27 +116,37 @@ class OrtBeatThisBackend(modelBytes: ByteArray, threads: Int = 2) :
                     }
                 }
             }
-        watcher.name = "BeatWeave-ORT-cancellation"
-        watcher.isDaemon = true
-        var watcherStarted = false
-        var result: BeatThisLogits? = null
-        var inferenceFailure: Throwable? = null
-        try {
-            watcher.start()
+            watcher = activeWatcher
+            activeWatcher.name = "BeatWeave-ORT-cancellation"
+            activeWatcher.isDaemon = true
+            activeWatcher.start()
             watcherStarted = true
             result = runInference(logMel, frames, runOptions)
         } catch (failure: Throwable) {
             inferenceFailure = failure
         } finally {
             completed.set(true)
-            if (watcherStarted) {
-                LockSupport.unpark(watcher)
-                joinUninterruptibly(watcher)
-            }
-            runOptions.close()
+            completionFailure =
+                collectResourceCleanupFailure(
+                    null,
+                    {
+                        if (watcherStarted) {
+                            val activeWatcher = checkNotNull(watcher)
+                            LockSupport.unpark(activeWatcher)
+                            joinUninterruptibly(activeWatcher)
+                        }
+                    },
+                    runOptions::close,
+                )
         }
-        cancellation.get()?.let { throw it }
-        inferenceFailure?.let { throw it }
+        val primaryFailure = cancellation.get() ?: inferenceFailure
+        if (primaryFailure != null) {
+            completionFailure?.let {
+                if (it !== primaryFailure) primaryFailure.addSuppressed(it)
+            }
+            throw primaryFailure
+        }
+        completionFailure?.let { throw it }
         cancellationCheck()
         return checkNotNull(result)
     }
@@ -190,14 +201,29 @@ class OrtBeatThisBackend(modelBytes: ByteArray, threads: Int = 2) :
     override fun close() {
         if (!closed) {
             closed = true
-            try {
-                session.close()
-            } finally {
-                sessionOptions.close()
-            }
+            collectResourceCleanupFailure(null, session::close, sessionOptions::close)
+                ?.let { throw it }
         }
         // OrtEnvironment is a JVM-wide singleton owned by ORT. Do not close it here.
     }
+}
+
+/** Run every owned-resource cleanup while retaining an existing primary failure, if any. */
+internal fun collectResourceCleanupFailure(
+    primaryFailure: Throwable?,
+    vararg cleanup: () -> Unit,
+): Throwable? {
+    var failure = primaryFailure
+    for (action in cleanup) {
+        try {
+            action()
+        } catch (cleanupFailure: Throwable) {
+            val previous = failure
+            if (previous == null) failure = cleanupFailure
+            else if (cleanupFailure !== previous) previous.addSuppressed(cleanupFailure)
+        }
+    }
+    return failure
 }
 
 private const val CANCELLATION_POLL_NANOS = 25_000_000L
