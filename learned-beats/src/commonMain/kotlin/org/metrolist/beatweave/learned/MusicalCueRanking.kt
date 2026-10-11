@@ -239,11 +239,11 @@ internal class MusicalCueRanking(
             duration.isFinite() && duration > 0.0 && sourceBlocks.size >= 4 &&
                 validBlocks(sourceBlocks)
         private val blocks = if (available) sourceBlocks else emptyList()
-        private val median =
-            blocks.map { it.rmsDb }.sorted().let {
-                cancellationCheck()
-                it.getOrNull(it.size / 2) ?: 0.0
-            }
+        // Energy blocks describe spans, not equally weighted observations. Counting each block
+        // once lets arbitrary feature segmentation change whether the same passage is considered
+        // quiet. Use an upper duration-weighted median so splitting a block without changing its
+        // level cannot alter cue ranking; equal-duration blocks retain the previous convention.
+        private val median = durationWeightedMedian(blocks)
         private val energyPrefixes = energyPrefixes(blocks)
         private val weightedEnergy = energyPrefixes.first
         private val coveredSeconds = energyPrefixes.second
@@ -267,6 +267,59 @@ internal class MusicalCueRanking(
             }
             cancellationCheck()
             return true
+        }
+
+        private fun durationWeightedMedian(values: List<EnergyBlock>): Double {
+            if (values.isEmpty()) return 0.0
+            var levels = DoubleArray(values.size)
+            var durations = DoubleArray(values.size)
+            var totalDuration = 0.0
+            for (i in values.indices) {
+                if (i % CANCELLATION_INTERVAL == 0) cancellationCheck()
+                levels[i] = values[i].rmsDb
+                durations[i] = values[i].endSeconds - values[i].startSeconds
+                totalDuration += durations[i]
+            }
+            var sortedLevels = DoubleArray(values.size)
+            var sortedDurations = DoubleArray(values.size)
+            var width = 1
+            var work = 0
+            while (width < values.size) {
+                var start = 0
+                while (start < values.size) {
+                    val middle = min(start + width, values.size)
+                    val end = min(start + width * 2, values.size)
+                    var left = start
+                    var right = middle
+                    var output = start
+                    while (output < end) {
+                        val source =
+                            if (right >= end ||
+                                left < middle && levels[left].compareTo(levels[right]) <= 0
+                            ) left++ else right++
+                        sortedLevels[output] = levels[source]
+                        sortedDurations[output] = durations[source]
+                        output++
+                        if (++work % CANCELLATION_INTERVAL == 0) cancellationCheck()
+                    }
+                    start = end
+                }
+                val levelSwap = levels
+                levels = sortedLevels
+                sortedLevels = levelSwap
+                val durationSwap = durations
+                durations = sortedDurations
+                sortedDurations = durationSwap
+                width = if (width > values.size / 2) values.size else width * 2
+            }
+            var covered = 0.0
+            val midpoint = totalDuration / 2.0
+            for (i in levels.indices) {
+                if (i % CANCELLATION_INTERVAL == 0) cancellationCheck()
+                covered += durations[i]
+                if (covered > midpoint) return levels[i]
+            }
+            return levels.last()
         }
 
         private fun energyPrefixes(values: List<EnergyBlock>): Pair<DoubleArray, DoubleArray> {

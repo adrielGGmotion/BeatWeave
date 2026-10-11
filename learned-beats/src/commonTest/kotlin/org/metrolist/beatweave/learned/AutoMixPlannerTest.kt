@@ -350,6 +350,38 @@ class AutoMixPlannerTest {
         )
     }
 
+    @Test
+    fun cueRankingIsInvariantToEnergyBlockSegmentation() {
+        val base = song(List(8) { 4 })
+        val duration = base.audio.durationSeconds
+        val coarseBlocks =
+            listOf(
+                EnergyBlock(0.0, 3.0, -24.0),
+                EnergyBlock(3.0, 6.0, -24.0),
+                EnergyBlock(6.0, 10.0, -24.0),
+                EnergyBlock(10.0, duration, -6.0),
+            )
+        val loudBlockDuration = (duration - 10.0) / 4.0
+        val segmentedBlocks =
+            coarseBlocks.take(3) +
+                List(4) { index ->
+                    EnergyBlock(
+                        10.0 + index * loudBlockDuration,
+                        10.0 + (index + 1) * loudBlockDuration,
+                        -6.0,
+                    )
+                }
+        val coarse = base.audio.copy(energyBlocks = coarseBlocks)
+        val segmented = base.audio.copy(energyBlocks = segmentedBlocks)
+        val grid = base.barTracking!!.grid()
+
+        val coarsePart = MusicalCueRanking(coarse, coarse).incoming(grid, start = 1, bars = 2)
+        val segmentedPart =
+            MusicalCueRanking(segmented, segmented).incoming(grid, start = 1, bars = 2)
+
+        assertEquals(coarsePart, segmentedPart)
+    }
+
     /** Missing audio outside the recording must not be treated as a measured dynamics change. */
     @Test
     fun cueRankingDoesNotFabricateLiftsAtTrackBoundaries() {
