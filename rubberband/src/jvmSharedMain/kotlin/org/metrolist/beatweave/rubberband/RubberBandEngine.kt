@@ -299,6 +299,13 @@ private fun openDiskPreparedPcm(
             input.close()
         } catch (closeFailure: Throwable) {
             if (closeFailure !== failure) failure.addSuppressed(closeFailure)
+            // Construction never transferred ownership of this stream. Retry a transient close
+            // failure before the only reference disappears and the outer cleanup unlinks its file.
+            try {
+                input.close()
+            } catch (retryFailure: Throwable) {
+                if (retryFailure !== closeFailure) closeFailure.addSuppressed(retryFailure)
+            }
         }
         throw failure
     }
