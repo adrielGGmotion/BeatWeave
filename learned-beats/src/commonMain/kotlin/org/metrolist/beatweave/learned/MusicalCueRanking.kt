@@ -461,9 +461,9 @@ internal class MusicalCueRanking(
 
 private const val MINIMUM_CHANGE_CONTEXT_FRACTION = 0.5
 private const val LEVEL_HALF_WINDOW_SECONDS = 2.0
-// The built-in analyzer emits four-second blocks. Its former four-block gate became eligible as
-// soon as measured energy extended beyond twelve seconds; express that evidence threshold in time
-// so caller block segmentation cannot change the policy.
-private const val MINIMUM_CUE_EVIDENCE_SECONDS = 12.0
+// A cue change compares four-second contexts. Require more than one such window of measured energy
+// overall, then let the stricter per-candidate coverage checks decide which features are usable.
+// Expressing this in time keeps caller block segmentation from changing the ranking policy.
+private const val MINIMUM_CUE_EVIDENCE_SECONDS = 4.0
 private const val MISSING_LEVEL_MISMATCH_DB = 6.0
 private const val CANCELLATION_INTERVAL = 4096

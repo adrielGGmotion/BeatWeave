@@ -22,7 +22,8 @@ Caller-supplied energy blocks outside the declared recording span invalidate cue
 of selecting an audio-aware policy from measurements that cannot describe the source audio.
 The song-wide quietness reference weights energy blocks by their covered duration, so splitting an
 unchanged passage into more feature blocks cannot by itself change cue-ranking eligibility or a cue
-score. Audio-aware cue ranking requires more than twelve seconds of valid measured energy coverage.
+score. Audio-aware cue ranking requires more than one four-second analysis window of valid measured
+energy coverage; individual level and dynamics features retain their stricter local coverage gates.
 Onset-activity normalization uses only frame coverage inside the declared recording span, so
 leading or trailing feature padding cannot attenuate otherwise identical in-recording changes.
 When a short candidate's endpoint-analysis windows overlap, their dynamics contribution is
