@@ -208,8 +208,9 @@ class OrtBeatThisBackend(modelBytes: ByteArray, threads: Int = 2) :
 }
 
 /**
- * Closes every owned resource and remembers only successful actions. A later call therefore
- * retries a resource whose close failed without double-closing resources already released.
+ * Closes dependent resources in order and remembers successful actions. A failure leaves that
+ * action and every dependent action pending for a later call without double-closing resources
+ * already released.
  */
 internal class RetryableResourceCloser(vararg cleanup: () -> Unit) {
     private val actions = cleanup
@@ -217,15 +218,14 @@ internal class RetryableResourceCloser(vararg cleanup: () -> Unit) {
 
     fun close(): Throwable? {
         var failure: Throwable? = null
-        actions.forEachIndexed { index, action ->
-            if (complete[index]) return@forEachIndexed
+        for (index in actions.indices) {
+            if (complete[index]) continue
             try {
-                action()
+                actions[index]()
                 complete[index] = true
             } catch (cleanupFailure: Throwable) {
-                val previous = failure
-                if (previous == null) failure = cleanupFailure
-                else if (cleanupFailure !== previous) previous.addSuppressed(cleanupFailure)
+                failure = cleanupFailure
+                break
             }
         }
         return failure

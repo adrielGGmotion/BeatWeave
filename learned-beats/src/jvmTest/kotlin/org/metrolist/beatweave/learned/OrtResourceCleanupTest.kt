@@ -57,11 +57,36 @@ class OrtResourceCleanupTest {
     }
 
     @Test
-    fun retryClosesOnlyResourcesThatPreviouslyFailed() {
+    fun failedSessionCloseKeepsDependentOptionsOpenUntilRetry() {
+        val transient = IllegalStateException("session close failed")
+        var sessionCloses = 0
+        var optionsCloses = 0
+        val closer =
+            RetryableResourceCloser(
+                {
+                    sessionCloses++
+                    if (sessionCloses == 1) throw transient
+                },
+                { optionsCloses++ },
+            )
+
+        assertSame(transient, closer.close())
+        assertEquals(1, sessionCloses)
+        assertEquals(0, optionsCloses, "options must outlive a session that failed to close")
+
+        assertNull(closer.close())
+        assertEquals(2, sessionCloses, "the failed session close must remain retryable")
+        assertEquals(1, optionsCloses)
+        assertNull(closer.close())
+        assertEquals(2, sessionCloses)
+        assertEquals(1, optionsCloses)
+    }
+
+    @Test
+    fun failedOptionsCloseRetriesWithoutClosingSessionTwice() {
         val transient = IllegalStateException("options close failed")
         var sessionCloses = 0
         var optionsCloses = 0
-        var otherCloses = 0
         val closer =
             RetryableResourceCloser(
                 { sessionCloses++ },
@@ -69,18 +94,15 @@ class OrtResourceCleanupTest {
                     optionsCloses++
                     if (optionsCloses == 1) throw transient
                 },
-                { otherCloses++ },
             )
 
         assertSame(transient, closer.close())
         assertEquals(1, sessionCloses)
         assertEquals(1, optionsCloses)
-        assertEquals(1, otherCloses)
 
         assertNull(closer.close())
         assertEquals(1, sessionCloses, "successful resources must not be closed twice")
         assertEquals(2, optionsCloses, "the failed close must remain retryable")
-        assertEquals(1, otherCloses, "later successful resources must not be closed twice")
         assertNull(closer.close())
         assertEquals(2, optionsCloses)
     }
