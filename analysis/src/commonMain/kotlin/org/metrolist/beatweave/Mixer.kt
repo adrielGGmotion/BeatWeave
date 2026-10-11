@@ -673,9 +673,14 @@ private fun checkedRead(source: StereoPcm, start: Long, frames: Int, rate: Int):
 private inline fun PreparedMix.use(block: () -> Unit) {
     try {
         block()
-        close()
     } catch (failure: Throwable) {
         closeAfterFailure(failure) { close() }
+        throw failure
+    }
+    try {
+        close()
+    } catch (failure: Throwable) {
+        retryCloseAfterFailure(failure) { close() }
         throw failure
     }
 }
@@ -688,11 +693,14 @@ private inline fun closeAfterFailure(failure: Throwable, close: () -> Unit) {
         if (cleanupFailure !== failure) failure.addSuppressed(cleanupFailure)
         // close() is required to be idempotent. One retry gives transient filesystem cleanup
         // failures a chance to release the prepared cache before this owned result is lost.
-        try {
-            close()
-        } catch (retryFailure: Throwable) {
-            if (retryFailure !== failure && retryFailure !== cleanupFailure)
-                cleanupFailure.addSuppressed(retryFailure)
-        }
+        retryCloseAfterFailure(cleanupFailure, close)
+    }
+}
+
+private inline fun retryCloseAfterFailure(failure: Throwable, close: () -> Unit) {
+    try {
+        close()
+    } catch (retryFailure: Throwable) {
+        if (retryFailure !== failure) failure.addSuppressed(retryFailure)
     }
 }
