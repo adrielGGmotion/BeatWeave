@@ -24,6 +24,24 @@ data class TransitionCoverage(
     val declinedBars: Map<Int, String>,
 )
 
+internal fun LocalSongAnalysis.latestAcceptedPulseBeat(
+    cancellationCheck: () -> Unit = {},
+): Int? {
+    if (pulse.quality.safeForAutomaticMix) return pulse.beats.lastIndex
+    var latest: Int? = null
+    var index = 0
+    while (index < pulseRegions.size) {
+        cancellationCheck()
+        val region = pulseRegions[index++]
+        if (region.quality.safeForAutomaticMix && region.startBeat >= 0 &&
+            region.endBeatExclusive <= pulse.beats.size &&
+            region.endBeatExclusive - region.startBeat >= 2) {
+            latest = maxOf(latest ?: -1, region.endBeatExclusive - 1)
+        }
+    }
+    return latest
+}
+
 /**
  * Reports usable transition coverage without extending or changing a rejected outro grid.
  * Times use this analysis's source clock (add the decode-window offset in a full-track caller).
@@ -78,10 +96,7 @@ fun LocalSongAnalysis.transitionCoverage(isCancelled: () -> Boolean = { false })
         }
     }
     flush(grid.barCount)
-    val lastPulse = if (pulse.quality.safeForAutomaticMix) pulse.beats.lastIndex else
-        pulseRegions.filter { it.quality.safeForAutomaticMix && it.startBeat >= 0 &&
-            it.endBeatExclusive <= pulse.beats.size && it.endBeatExclusive - it.startBeat >= 2 }
-            .maxOfOrNull { it.endBeatExclusive - 1 }
+    val lastPulse = latestAcceptedPulseBeat(::checkCancellation)
     checkCancellation()
     return TransitionCoverage(regions, lastPulse, lastPulse?.let { pulse.beats[it].seconds },
         regions.lastOrNull()?.endSeconds, declined)
