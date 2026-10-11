@@ -199,13 +199,30 @@ internal constructor(
      * bar, including both endpoints, must be contained in one independently accepted canonical
      * pulse region. Empty input declines all.
      */
-    fun withPulseSupport(regions: List<AcceptedPulseRegion>): BarTrackingResult {
+    fun withPulseSupport(regions: List<AcceptedPulseRegion>): BarTrackingResult =
+        withPulseSupport(regions) {}
+
+    internal fun withPulseSupport(
+        regions: List<AcceptedPulseRegion>,
+        cancellationCheck: () -> Unit,
+    ): BarTrackingResult {
+        cancellationCheck()
         val support =
             BooleanArray(barCount) { bar ->
-                regions.any {
-                    it.quality.safeForAutomaticMix &&
-                        it.contains(boundaries[bar].beatIndex, boundaries[bar + 1].beatIndex + 1)
+                cancellationCheck()
+                val iterator = regions.iterator()
+                var accepted = false
+                while (!accepted && iterator.hasNext()) {
+                    cancellationCheck()
+                    val region = iterator.next()
+                    accepted =
+                        region.quality.safeForAutomaticMix &&
+                            region.contains(
+                                boundaries[bar].beatIndex,
+                                boundaries[bar + 1].beatIndex + 1,
+                            )
                 }
+                accepted
             }
         return BarTrackingResult(
             seconds,

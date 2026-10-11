@@ -148,7 +148,7 @@ class LocalSongAnalyzer(private val backend: BeatThisBackend) {
                     learned.logits.downbeat,
                     cancellationCheck = cancellationCheck,
                 )
-                .withPulseSupport(selection.regions.accepted)
+                .withPulseSupport(selection.regions.accepted, cancellationCheck)
                 .withAcousticPulseSupport(acousticPulse)
         val barWarnings =
             if (bars.safeForAutomaticBars) emptyList()

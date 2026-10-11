@@ -203,6 +203,41 @@ class BarTrackerTest {
     }
 
     @Test
+    fun pulseMaskStopsLongRegionScanPromptly() {
+        class Cancelled : RuntimeException()
+
+        val f = fixture(List(12) { 4 })
+        val phaseOnly = track(f)
+        val irrelevant =
+            AcceptedPulseRegion(
+                f.beats.lastIndex - 4,
+                f.beats.size,
+                f.beats[f.beats.lastIndex - 4].seconds,
+                f.beats.last().seconds,
+                org.metrolist.beatweave.BeatGridQuality.audit(f.beats.takeLast(5)),
+            )
+        var reads = 0
+        val regions =
+            object : AbstractList<AcceptedPulseRegion>() {
+                override val size = 50_000
+
+                override fun get(index: Int): AcceptedPulseRegion {
+                    reads++
+                    return irrelevant
+                }
+            }
+
+        assertFailsWith<Cancelled> {
+            phaseOnly.withPulseSupport(regions) {
+                if (reads == 2) throw Cancelled()
+            }
+        }
+
+        // The former List.any scan had no cancellation callback and necessarily read all 50,000.
+        assertEquals(2, reads)
+    }
+
+    @Test
     fun diagnosticsRetainConcurrentPhaseAndPulseFailuresWithoutChangingDecisions() {
         val f = fixture(List(24) { 2 }, missing = setOf(42, 46))
         val phase = track(f)
