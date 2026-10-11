@@ -254,6 +254,15 @@ class RubberBandEngine(private val cacheDirectory: File) : PitchShiftEngine {
                         } catch (resultCleanupFailure: Throwable) {
                             if (resultCleanupFailure !== failure)
                                 failure.addSuppressed(resultCleanupFailure)
+                            // The result cannot reach its caller after the surrounding cleanup
+                            // failure. Retry transient stream/filesystem cleanup before losing the
+                            // only owner of the completed output.
+                            try {
+                                result.close()
+                            } catch (retryFailure: Throwable) {
+                                if (retryFailure !== resultCleanupFailure)
+                                    resultCleanupFailure.addSuppressed(retryFailure)
+                            }
                         }
                     }
                     throw failure
