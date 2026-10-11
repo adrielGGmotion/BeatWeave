@@ -2,6 +2,7 @@
 package org.metrolist.beatweave.rubberband
 
 import java.io.File
+import java.io.IOException
 import java.io.RandomAccessFile
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -25,6 +26,8 @@ import org.metrolist.beatweave.*
  * see its COPYING and THIRD_PARTY.md.
  */
 class RubberBandEngine(private val cacheDirectory: File) : PitchShiftEngine {
+    internal var deleteFile: (File) -> Boolean = File::delete
+
     override fun prepare(
         source: StereoPcm,
         schedule: WarpSchedule,
@@ -60,6 +63,8 @@ class RubberBandEngine(private val cacheDirectory: File) : PitchShiftEngine {
         var handle = 0L
         var inputFile: File? = null
         var outputFile: File? = null
+        var preparedResult: DiskPreparedPcm? = null
+        var primaryFailure: Throwable? = null
         try {
             // LinkageError is intentional: missing/incompatible native libraries cannot
             // silently select an engine with different timing or pitch behavior.
@@ -129,8 +134,14 @@ class RubberBandEngine(private val cacheDirectory: File) : PitchShiftEngine {
                     snapshot.channel.force(false)
                     update(1.0)
                     val result =
-                        DiskPreparedPcm(inputFile!!, schedule.sampleRate, schedule.outputFrames)
+                        DiskPreparedPcm(
+                            inputFile!!,
+                            schedule.sampleRate,
+                            schedule.outputFrames,
+                            deleteFile,
+                        )
                     inputFile = null
+                    preparedResult = result
                     return result
                 }
                 snapshot.seek(0)
@@ -204,13 +215,50 @@ class RubberBandEngine(private val cacheDirectory: File) : PitchShiftEngine {
                 }
             }
             update(1.0)
-            val result = DiskPreparedPcm(outputFile!!, schedule.sampleRate, schedule.outputFrames)
+            val result =
+                DiskPreparedPcm(
+                    outputFile!!,
+                    schedule.sampleRate,
+                    schedule.outputFrames,
+                    deleteFile,
+                )
             outputFile = null
+            preparedResult = result
             return result
+        } catch (failure: Throwable) {
+            primaryFailure = failure
+            throw failure
         } finally {
-            if (handle != 0L) RubberBandBridge.destroy(handle)
-            inputFile?.delete()
-            outputFile?.delete()
+            var cleanupFailure: Throwable? = null
+            fun cleanup(action: () -> Unit) {
+                try {
+                    action()
+                } catch (failure: Throwable) {
+                    val previous = cleanupFailure
+                    if (previous == null) cleanupFailure = failure
+                    else if (failure !== previous) previous.addSuppressed(failure)
+                }
+            }
+            if (handle != 0L) cleanup { RubberBandBridge.destroy(handle) }
+            inputFile?.let { file -> cleanup { deletePreparedFile(file, deleteFile) } }
+            outputFile?.let { file -> cleanup { deletePreparedFile(file, deleteFile) } }
+            cleanupFailure?.let { failure ->
+                val primary = primaryFailure
+                if (primary != null) {
+                    if (failure !== primary) primary.addSuppressed(failure)
+                } else {
+                    // A result that never reaches its caller must not retain the completed output.
+                    preparedResult?.let { result ->
+                        try {
+                            result.close()
+                        } catch (resultCleanupFailure: Throwable) {
+                            if (resultCleanupFailure !== failure)
+                                failure.addSuppressed(resultCleanupFailure)
+                        }
+                    }
+                    throw failure
+                }
+            }
         }
     }
 }
@@ -219,10 +267,13 @@ private class DiskPreparedPcm(
     private val file: File,
     private val sampleRate: Int,
     private val frames: Long,
+    private val deleteFile: (File) -> Boolean,
 ) : PreparedStereoPcm {
     private val input = RandomAccessFile(file, "r")
     private val bytes = ByteBuffer.allocate(4096 * 8).order(ByteOrder.LITTLE_ENDIAN)
     private var closed = false
+    private var inputClosed = false
+    private var deleted = false
     override val durationSeconds: Double
         get() = frames.toDouble() / sampleRate
 
@@ -264,14 +315,34 @@ private class DiskPreparedPcm(
 
     @Synchronized
     override fun close() {
-        if (!closed) {
-            closed = true
+        if (inputClosed && deleted) return
+        closed = true
+        var failure: Throwable? = null
+        if (!inputClosed) {
             try {
                 input.close()
-            } finally {
-                file.delete()
+                inputClosed = true
+            } catch (closeFailure: Throwable) {
+                failure = closeFailure
             }
         }
+        if (!deleted) {
+            try {
+                deletePreparedFile(file, deleteFile)
+                deleted = true
+            } catch (deleteFailure: Throwable) {
+                val previous = failure
+                if (previous == null) failure = deleteFailure
+                else if (deleteFailure !== previous) previous.addSuppressed(deleteFailure)
+            }
+        }
+        failure?.let { throw it }
+    }
+}
+
+private fun deletePreparedFile(file: File, deleteFile: (File) -> Boolean) {
+    if (!deleteFile(file) && file.exists()) {
+        throw IOException("Could not delete prepared PCM cache file ${file.name}")
     }
 }
 

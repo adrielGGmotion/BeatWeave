@@ -29,7 +29,7 @@ class MixerFailureTest {
         }
         assertEquals("Stretcher returned an incorrect duration", failure.message)
         assertSame(engine.closeFailure, failure.suppressedExceptions.single())
-        assertEquals(1, engine.closes)
+        assertEquals(2, engine.closes)
     }
 
     @Test
@@ -41,7 +41,7 @@ class MixerFailureTest {
         }
         assertSame(progressFailure, failure)
         assertSame(engine.closeFailure, failure.suppressedExceptions.single())
-        assertEquals(1, engine.closes)
+        assertEquals(2, engine.closes)
     }
 
     @Test
@@ -62,7 +62,7 @@ class MixerFailureTest {
             }
             assertSame(sinkFailure, failure)
             assertSame(engine.closeFailure, failure.suppressedExceptions.single())
-            assertEquals(1, engine.closes)
+            assertEquals(2, engine.closes)
         }
     }
 
@@ -77,7 +77,22 @@ class MixerFailureTest {
             BeatMixer(engine).renderRange(source, source, plan, sink, 0.0, 0.01)
         }
         assertSame(engine.closeFailure, failure)
-        assertEquals(1, engine.closes)
+        assertEquals(2, engine.closes)
+    }
+
+    @Test
+    fun failedPreparedMixCloseCanRetryCleanupWithoutReopeningReads() {
+        val engine = RetryCloseEngine()
+        val prepared = BeatMixer(engine).prepare(source, source, plan)
+
+        assertSame(engine.closeFailure, assertFailsWith<UnsupportedOperationException> {
+            prepared.close()
+        })
+        assertFailsWith<IllegalStateException> { prepared.startFrame() }
+
+        prepared.close()
+        prepared.close()
+        assertEquals(2, engine.closes)
     }
 
     @Test
@@ -140,6 +155,29 @@ class MixerFailureTest {
                 override fun close() {
                     closes++
                     throw closeFailure
+                }
+            }
+    }
+
+    private class RetryCloseEngine : PitchStretchEngine {
+        val closeFailure = UnsupportedOperationException("cache cleanup failed")
+        var closes = 0
+
+        override fun prepare(
+            source: StereoPcm,
+            schedule: WarpSchedule,
+            progress: (Double) -> Unit,
+        ): PreparedStereoPcm =
+            object : PreparedStereoPcm {
+                override val durationSeconds =
+                    schedule.outputFrames.toDouble() / schedule.sampleRate
+
+                override fun read(startSeconds: Double, frames: Int, outputSampleRate: Int) =
+                    FloatArray(frames * 2)
+
+                override fun close() {
+                    closes++
+                    if (closes == 1) throw closeFailure
                 }
             }
     }

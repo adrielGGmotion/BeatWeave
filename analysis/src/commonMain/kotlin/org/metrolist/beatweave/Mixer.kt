@@ -498,6 +498,7 @@ internal constructor(
     private val isCancelled: () -> Boolean,
 ) {
     private var closed = false
+    private var cleanupComplete = false
     private val rate = plan.outputSampleRate
 
     /**
@@ -637,10 +638,10 @@ internal constructor(
     }
 
     fun close() {
-        if (!closed) {
-            closed = true
-            second.close()
-        }
+        if (cleanupComplete) return
+        closed = true
+        second.close()
+        cleanupComplete = true
     }
 
     private fun checkOpen() = check(!closed) { "Prepared mix is closed" }
@@ -676,7 +677,12 @@ private inline fun PreparedMix.use(block: () -> Unit) {
         closeAfterFailure(failure) { close() }
         throw failure
     }
-    close()
+    try {
+        close()
+    } catch (failure: Throwable) {
+        retryCloseAfterFailure(failure) { close() }
+        throw failure
+    }
 }
 
 /** Cleanup must not replace a decoder, sink or cancellation error. */
@@ -685,5 +691,16 @@ private inline fun closeAfterFailure(failure: Throwable, close: () -> Unit) {
         close()
     } catch (cleanupFailure: Throwable) {
         if (cleanupFailure !== failure) failure.addSuppressed(cleanupFailure)
+        // close() is required to be idempotent. One retry gives transient filesystem cleanup
+        // failures a chance to release the prepared cache before this owned result is lost.
+        retryCloseAfterFailure(cleanupFailure, close)
+    }
+}
+
+private inline fun retryCloseAfterFailure(failure: Throwable, close: () -> Unit) {
+    try {
+        close()
+    } catch (retryFailure: Throwable) {
+        if (retryFailure !== failure) failure.addSuppressed(retryFailure)
     }
 }
