@@ -224,7 +224,49 @@ internal constructor(
                 }
                 accepted
             }
-        return BarTrackingResult(
+        return copyWithPulseSupport(support)
+    }
+
+    /** Linear sweep for the ordered, monotonically advancing regions produced by PulseRegions. */
+    internal fun withOrderedPulseSupport(
+        regions: List<AcceptedPulseRegion>,
+        cancellationCheck: () -> Unit,
+    ): BarTrackingResult {
+        cancellationCheck()
+        val iterator = regions.iterator()
+        var previousStart = Int.MIN_VALUE
+        var previousEnd = Int.MIN_VALUE
+        fun nextAccepted(): AcceptedPulseRegion? {
+            while (iterator.hasNext()) {
+                cancellationCheck()
+                val next = iterator.next()
+                require(
+                    next.startBeat >= previousStart && next.endBeatExclusive >= previousEnd
+                ) {
+                    "Pulse regions must be ordered by monotonically advancing beat bounds"
+                }
+                previousStart = next.startBeat
+                previousEnd = next.endBeatExclusive
+                if (next.quality.safeForAutomaticMix) return next
+            }
+            return null
+        }
+
+        var current = nextAccepted()
+        val support =
+            BooleanArray(barCount) { bar ->
+                cancellationCheck()
+                val start = boundaries[bar].beatIndex
+                val endExclusive = boundaries[bar + 1].beatIndex + 1
+                while (current != null && current!!.endBeatExclusive < endExclusive)
+                    current = nextAccepted()
+                current?.contains(start, endExclusive) == true
+            }
+        return copyWithPulseSupport(support)
+    }
+
+    private fun copyWithPulseSupport(support: BooleanArray): BarTrackingResult =
+        BarTrackingResult(
             seconds,
             rawDownbeatSeconds,
             boundaries,
@@ -236,7 +278,6 @@ internal constructor(
             support,
             acousticPulseSupport,
         )
-    }
 
     /** Requires direct local activity and complete context for every interval in each bar. */
     fun withAcousticPulseSupport(evidence: AcousticPulseReport): BarTrackingResult {
