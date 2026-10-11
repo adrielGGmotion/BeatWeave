@@ -296,6 +296,10 @@ class RubberBandEngineTest {
             engine.beforePreparedOwnershipTransfer = {
                 throw IOException("injected prepared-result construction failure")
             }
+            engine.deleteFile = { file ->
+                assertEquals(1, closed, "Prepared input must close before cache deletion")
+                file.delete()
+            }
 
             val failure = assertFailsWith<IOException> {
                 engine.prepare(
