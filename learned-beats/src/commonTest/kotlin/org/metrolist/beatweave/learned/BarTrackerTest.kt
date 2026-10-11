@@ -238,6 +238,45 @@ class BarTrackerTest {
     }
 
     @Test
+    fun analyzerOrderedPulseMaskReadsEachRegionAtMostOnce() {
+        val f = fixture(List(128) { 4 })
+        val phaseOnly = track(f)
+        assertEquals(128, phaseOnly.barCount)
+        val quality = org.metrolist.beatweave.BeatGridQuality.audit(f.beats)
+        val backing =
+            List(phaseOnly.barCount) { bar ->
+                val start = phaseOnly.boundaries[bar].beatIndex
+                val end = phaseOnly.boundaries[bar + 1].beatIndex
+                AcceptedPulseRegion(
+                    start,
+                    end + 1,
+                    f.beats[start].seconds,
+                    f.beats[end].seconds,
+                    quality,
+                )
+            }
+        var reads = 0
+        val counted =
+            object : AbstractList<AcceptedPulseRegion>() {
+                override val size: Int
+                    get() = backing.size
+
+                override fun get(index: Int): AcceptedPulseRegion {
+                    reads++
+                    return backing[index]
+                }
+            }
+
+        val baseline = phaseOnly.withPulseSupport(counted)
+        assertEquals(8_256, reads)
+        reads = 0
+        val linear = phaseOnly.withOrderedPulseSupport(counted) {}
+
+        assertEquals(128, reads)
+        assertContentEquals(baseline.barPulseSupported, linear.barPulseSupported)
+    }
+
+    @Test
     fun diagnosticsRetainConcurrentPhaseAndPulseFailuresWithoutChangingDecisions() {
         val f = fixture(List(24) { 2 }, missing = setOf(42, 46))
         val phase = track(f)
