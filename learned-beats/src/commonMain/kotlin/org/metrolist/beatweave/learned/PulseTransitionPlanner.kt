@@ -70,9 +70,10 @@ internal object PulseTransitionPlanner {
         val count = aEnd - aStart
         require(count <= 512) { "Transition exceeds the renderer's 512-pulse fade limit" }
         TransitionEvidence.requireBars(first, a, outgoing, bars, inherited, isCancelled)
-        first.requirePulseGeometryRange(aStart, aEnd + 1)
+        first.requirePulseGeometryRange(aStart, aEnd + 1, ::checkCancellation)
         val directlySupportedEnd = inherited.minOrNull()?.let { a.boundary(it) } ?: aEnd
-        if (directlySupportedEnd > aStart) first.requirePulseRange(aStart, directlySupportedEnd + 1)
+        if (directlySupportedEnd > aStart)
+            first.requirePulseRange(aStart, directlySupportedEnd + 1, ::checkCancellation)
         val firstGrid = BeatGrid(a.beats.times.copyOfRange(aStart, aEnd + 1))
 
         // Counts alone cannot distinguish two metrical levels from two different meters.
@@ -97,11 +98,11 @@ internal object PulseTransitionPlanner {
                 val touchedEndBar = b.barStartBeats.indexOfFirst { it >= bEnd }
                 TransitionEvidence.requireBars(second, b, incoming, touchedEndBar - incoming,
                     emptySet(), isCancelled, endBeat = bEnd)
-                second.requirePulseRange(bStart, bEnd + 1)
+                second.requirePulseRange(bStart, bEnd + 1, ::checkCancellation)
                 require(fitOptions.pinnedIncomingBeats.all { it in bStart..bEnd && it <= bEndPosition }) {
                     "Pinned incoming canonical beat lies outside the selected pulse range"
                 }
-                val secondGrid = second.matchingGrid(bStart, bEnd + 1)
+                val secondGrid = second.matchingGrid(bStart, bEnd + 1, ::checkCancellation)
                 require(
                     first.audio.durationSeconds.isFinite() && second.audio.durationSeconds.isFinite() &&
                         firstGrid.at(0) >= 0.0 && secondGrid.at(0) >= 0.0 &&
@@ -156,14 +157,17 @@ internal object TransitionEvidence {
         song: LocalSongAnalysis, grid: BarGrid, start: Int, count: Int,
         inherited: Set<Int>, isCancelled: () -> Boolean, endBeat: Int = grid.boundary(start + count),
     ) {
+        fun checkCancellation() { if (isCancelled()) throw MixCancelledException() }
         val tracking = song.barTracking
         for (bar in start until start + count) {
-            if (isCancelled()) throw MixCancelledException()
+            checkCancellation()
             if (bar in inherited) {
                 val issues = tracking?.issuesForBar(bar).orEmpty()
                 if (issues.any { it != BarUsabilityIssue.UNSUPPORTED_ACOUSTIC_PULSE })
                     throw UncertainBarsException("Bar $bar is uncertain: ${issues.joinToString()}")
-                song.requirePulseGeometryRange(grid.boundary(bar), grid.boundary(bar + 1) + 1)
+                song.requirePulseGeometryRange(
+                    grid.boundary(bar), grid.boundary(bar + 1) + 1, ::checkCancellation,
+                )
             } else {
                 // Check phase even for the partially consumed last incoming bar.
                 if (tracking != null) {
@@ -173,7 +177,10 @@ internal object TransitionEvidence {
                     }
                     if (issues.isNotEmpty()) tracking.requireUsable(bar, 1)
                 }
-                song.requirePulseRange(grid.boundary(bar), minOf(grid.boundary(bar + 1), endBeat) + 1)
+                song.requirePulseRange(
+                    grid.boundary(bar), minOf(grid.boundary(bar + 1), endBeat) + 1,
+                    ::checkCancellation,
+                )
             }
         }
     }
@@ -213,7 +220,9 @@ internal object TransitionEvidence {
                 if (abs(period / anchorPeriod - 1.0) > 0.1) return emptySet()
             }
             // This option cannot expand a rejected canonical pulse region.
-            song.requirePulseGeometryRange(grid.boundary(bar), grid.boundary(bar + 1) + 1)
+            song.requirePulseGeometryRange(
+                grid.boundary(bar), grid.boundary(bar + 1) + 1,
+            ) { if (isCancelled()) throw MixCancelledException() }
             inherited += bar
         }
         return inherited

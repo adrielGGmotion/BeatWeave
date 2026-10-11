@@ -30,12 +30,28 @@ data class LocalSongAnalysis(
      * A local selection may be accepted while the unmodified full-track report rejects an outro.
      */
     fun requirePulseRange(startBeat: Int, endBeatExclusive: Int) {
-        requirePulseGeometryRange(startBeat, endBeatExclusive)
+        requirePulseRange(startBeat, endBeatExclusive) {}
+    }
+
+    internal fun requirePulseRange(
+        startBeat: Int,
+        endBeatExclusive: Int,
+        cancellationCheck: () -> Unit,
+    ) {
+        requirePulseGeometryRange(startBeat, endBeatExclusive, cancellationCheck)
         requireAcousticPulseRange(startBeat, endBeatExclusive)
     }
 
     /** Separate geometric/phase evidence for diagnostics; playback uses [requirePulseRange]. */
     internal fun requirePulseGeometryRange(startBeat: Int, endBeatExclusive: Int) {
+        requirePulseGeometryRange(startBeat, endBeatExclusive) {}
+    }
+
+    internal fun requirePulseGeometryRange(
+        startBeat: Int,
+        endBeatExclusive: Int,
+        cancellationCheck: () -> Unit,
+    ) {
         require(
             startBeat >= 0 &&
                 endBeatExclusive <= pulse.beats.size &&
@@ -43,10 +59,13 @@ data class LocalSongAnalysis(
         ) {
             "A pulse range requires at least two in-bounds canonical timestamps"
         }
-        require(
-            pulse.quality.safeForAutomaticMix ||
-                pulseRegions.any { it.contains(startBeat, endBeatExclusive) }
-        ) {
+        var supported = pulse.quality.safeForAutomaticMix
+        var index = 0
+        while (!supported && index < pulseRegions.size) {
+            cancellationCheck()
+            supported = pulseRegions[index++].contains(startBeat, endBeatExclusive)
+        }
+        require(supported) {
             "Requested pulse range crosses uncertain or rejected beat evidence"
         }
     }
@@ -62,7 +81,15 @@ data class LocalSongAnalysis(
 
     /** Range anchors keep their original absolute source timestamps; audio is never trimmed. */
     fun matchingGrid(startBeat: Int, endBeatExclusive: Int): BeatGrid {
-        requirePulseRange(startBeat, endBeatExclusive)
+        return matchingGrid(startBeat, endBeatExclusive) {}
+    }
+
+    internal fun matchingGrid(
+        startBeat: Int,
+        endBeatExclusive: Int,
+        cancellationCheck: () -> Unit,
+    ): BeatGrid {
+        requirePulseRange(startBeat, endBeatExclusive, cancellationCheck)
         return BeatGrid(
             pulse.beats.subList(startBeat, endBeatExclusive).map { it.seconds }.toDoubleArray()
         )

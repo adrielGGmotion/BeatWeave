@@ -77,12 +77,16 @@ fun LocalSongAnalysis.transitionCoverage(isCancelled: () -> Boolean = { false })
             val start = runStart
             if (start != null) {
                 try {
-                    requirePulseGeometryRange(grid.boundary(start), grid.boundary(bar + 1) + 1)
+                    requirePulseGeometryRange(
+                        grid.boundary(start), grid.boundary(bar + 1) + 1, ::checkCancellation,
+                    )
                     // Per-bar checks already cover every local window and activity fraction.
                     // Check the only additional acoustic condition: adjacent rests at the join.
                     // Avoid rescanning the entire growing region on every bar.
                     if (acousticPulse != null)
-                        requirePulseRange(grid.boundary(bar) - 1, grid.boundary(bar) + 2)
+                        requirePulseRange(
+                            grid.boundary(bar) - 1, grid.boundary(bar) + 2, ::checkCancellation,
+                        )
                 }
                 catch (_: IllegalArgumentException) { flush(bar) }
             }

@@ -755,7 +755,7 @@ object AutoMixPlanner {
                         song.requirePulseGeometryRange(
                             grid.boundary(bar),
                             grid.boundary(bar + 1) + 1,
-                        )
+                        ) { search.checkCancellation() }
                         true
                     } catch (_: IllegalArgumentException) {
                         false
@@ -774,7 +774,9 @@ object AutoMixPlanner {
                 val end = (low + high + 1) ushr 1
                 val usable =
                     try {
-                        song.requirePulseRange(grid.boundary(bar), grid.boundary(end) + 1)
+                        song.requirePulseRange(
+                            grid.boundary(bar), grid.boundary(end) + 1,
+                        ) { search.checkCancellation() }
                         true
                     } catch (_: IllegalArgumentException) {
                         false
@@ -831,6 +833,7 @@ object AutoMixPlanner {
         selection: AutoMixSelection? = null,
         inheritedOutgoingBars: Set<Int> = emptySet(),
     ): LocalMixPlan {
+        fun checkCancellation() { if (isCancelled()) throw MixCancelledException() }
         require(
             a.beats.times.contentEquals(first.pulse.beats.map { it.seconds }.toDoubleArray()) &&
                 b.beats.times.contentEquals(second.pulse.beats.map { it.seconds }.toDoubleArray())
@@ -845,11 +848,12 @@ object AutoMixPlanner {
         // Independently check each bar even for caller-assembled analyses. A
         // quiet/unsupported bar cannot borrow activity from its louder neighbor.
         for (index in 0 until bars) {
-            if (isCancelled()) throw MixCancelledException()
+            checkCancellation()
             // Outgoing evidence was checked above, including any explicitly inherited tail.
             second.requirePulseRange(
                 b.boundary(incoming + index),
                 b.boundary(incoming + index + 1) + 1,
+                ::checkCancellation,
             )
         }
         val aStart = a.boundary(outgoing)
@@ -859,11 +863,12 @@ object AutoMixPlanner {
         require(fitOptions.pinnedIncomingBeats.all { it in bStart..bEnd }) {
             "Pinned incoming canonical beat lies outside the selected bar range"
         }
-        first.requirePulseGeometryRange(aStart, aEnd + 1)
+        first.requirePulseGeometryRange(aStart, aEnd + 1, ::checkCancellation)
         val directlySupportedEnd = inheritedOutgoingBars.minOrNull()?.let { a.boundary(it) } ?: aEnd
-        if (directlySupportedEnd > aStart) first.requirePulseRange(aStart, directlySupportedEnd + 1)
+        if (directlySupportedEnd > aStart)
+            first.requirePulseRange(aStart, directlySupportedEnd + 1, ::checkCancellation)
         val firstGrid = BeatGrid(a.beats.times.copyOfRange(aStart, aEnd + 1))
-        val secondGrid = second.matchingGrid(bStart, bEnd + 1)
+        val secondGrid = second.matchingGrid(bStart, bEnd + 1, ::checkCancellation)
         require(
             first.audio.durationSeconds.isFinite() &&
                 second.audio.durationSeconds.isFinite() &&
