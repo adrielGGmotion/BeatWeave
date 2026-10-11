@@ -27,6 +27,8 @@ import org.metrolist.beatweave.*
  */
 class RubberBandEngine(private val cacheDirectory: File) : PitchShiftEngine {
     internal var deleteFile: (File) -> Boolean = File::delete
+    internal var openPreparedInput: (File) -> RandomAccessFile = { RandomAccessFile(it, "r") }
+    internal var beforePreparedOwnershipTransfer: () -> Unit = {}
 
     override fun prepare(
         source: StereoPcm,
@@ -134,11 +136,13 @@ class RubberBandEngine(private val cacheDirectory: File) : PitchShiftEngine {
                     snapshot.channel.force(false)
                     update(1.0)
                     val result =
-                        DiskPreparedPcm(
+                        openDiskPreparedPcm(
                             inputFile!!,
                             schedule.sampleRate,
                             schedule.outputFrames,
                             deleteFile,
+                            openPreparedInput,
+                            beforePreparedOwnershipTransfer,
                         )
                     inputFile = null
                     preparedResult = result
@@ -216,11 +220,13 @@ class RubberBandEngine(private val cacheDirectory: File) : PitchShiftEngine {
             }
             update(1.0)
             val result =
-                DiskPreparedPcm(
+                openDiskPreparedPcm(
                     outputFile!!,
                     schedule.sampleRate,
                     schedule.outputFrames,
                     deleteFile,
+                    openPreparedInput,
+                    beforePreparedOwnershipTransfer,
                 )
             outputFile = null
             preparedResult = result
@@ -272,14 +278,40 @@ class RubberBandEngine(private val cacheDirectory: File) : PitchShiftEngine {
     }
 }
 
+private fun openDiskPreparedPcm(
+    file: File,
+    sampleRate: Int,
+    frames: Long,
+    deleteFile: (File) -> Boolean,
+    openInput: (File) -> RandomAccessFile,
+    beforeOwnershipTransfer: () -> Unit,
+): DiskPreparedPcm {
+    val input = openInput(file)
+    try {
+        // Keep every fallible allocation inside the ownership bridge. If construction fails after
+        // opening the completed cache, close the stream before the engine deletes the unreachable
+        // file in its outer finally block.
+        val bytes = ByteBuffer.allocate(4096 * 8).order(ByteOrder.LITTLE_ENDIAN)
+        beforeOwnershipTransfer()
+        return DiskPreparedPcm(file, sampleRate, frames, deleteFile, input, bytes)
+    } catch (failure: Throwable) {
+        try {
+            input.close()
+        } catch (closeFailure: Throwable) {
+            if (closeFailure !== failure) failure.addSuppressed(closeFailure)
+        }
+        throw failure
+    }
+}
+
 private class DiskPreparedPcm(
     private val file: File,
     private val sampleRate: Int,
     private val frames: Long,
     private val deleteFile: (File) -> Boolean,
+    private val input: RandomAccessFile,
+    private val bytes: ByteBuffer,
 ) : PreparedStereoPcm {
-    private val input = RandomAccessFile(file, "r")
-    private val bytes = ByteBuffer.allocate(4096 * 8).order(ByteOrder.LITTLE_ENDIAN)
     private var closed = false
     private var inputClosed = false
     private var deleted = false
