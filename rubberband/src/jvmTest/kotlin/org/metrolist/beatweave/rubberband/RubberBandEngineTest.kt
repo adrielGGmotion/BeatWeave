@@ -2,6 +2,7 @@
 package org.metrolist.beatweave.rubberband
 
 import java.io.File
+import java.io.IOException
 import java.nio.file.Files
 import kotlin.math.PI
 import kotlin.math.sin
@@ -186,6 +187,65 @@ class RubberBandEngineTest {
                 WarpSchedule.from(plan(1.02), source.durationSeconds),
             ) {}
         }
+        assertTrue(cache.listFiles()!!.isEmpty())
+    }
+
+    @Test
+    fun decoderFailureRetainsCacheDeletionFailure() = withCache { cache ->
+        val engine = RubberBandEngine(cache)
+        engine.deleteFile = { false }
+
+        val failure = assertFailsWith<IllegalArgumentException> {
+            engine.prepare(
+                source(true),
+                WarpSchedule.from(plan(), source().durationSeconds),
+            ) {}
+        }
+
+        val cleanupFailure = assertIs<IOException>(failure.suppressedExceptions.single())
+        assertTrue(cleanupFailure.message!!.contains("beatweave-source-"))
+        assertEquals(1, cache.listFiles()!!.size)
+    }
+
+    @Test
+    fun successfulStretchDoesNotAbandonOutputWhenSourceCleanupFails() = withCache { cache ->
+        val engine = RubberBandEngine(cache)
+        engine.deleteFile = { file ->
+            if (file.name.startsWith("beatweave-source-")) false else file.delete()
+        }
+
+        val failure = assertFailsWith<IOException> {
+            engine.prepare(
+                source(),
+                WarpSchedule.from(plan(1.02), source().durationSeconds),
+            ) {}
+        }
+
+        assertTrue(failure.message!!.contains("beatweave-source-"))
+        val leftovers = cache.listFiles()!!.toList()
+        assertEquals(1, leftovers.size)
+        assertTrue(leftovers.single().name.startsWith("beatweave-source-"))
+    }
+
+    @Test
+    fun preparedCloseReportsDeletionFailureAndCanRetryCleanup() = withCache { cache ->
+        val engine = RubberBandEngine(cache)
+        var deletionBlocked = true
+        engine.deleteFile = { file -> if (deletionBlocked) false else file.delete() }
+        val prepared =
+            engine.prepare(
+                source(),
+                WarpSchedule.from(plan(), source().durationSeconds),
+            ) {}
+
+        val failure = assertFailsWith<IOException> { prepared.close() }
+        assertTrue(failure.message!!.contains("beatweave-source-"))
+        assertEquals(1, cache.listFiles()!!.size)
+        assertFailsWith<IllegalStateException> { prepared.readFrames(0, 1, rate) }
+
+        deletionBlocked = false
+        prepared.close()
+        prepared.close()
         assertTrue(cache.listFiles()!!.isEmpty())
     }
 

@@ -263,7 +263,9 @@ before replacing an existing playable session.
 
 Reuse the session for playback, seeking and export. Serialize reads and `close()`;
 sessions are not thread-safe. Closing is idempotent and deletes owned temporary
-files. The host still owns its decoders and sink.
+files. A failed cache deletion is reported instead of being silently ignored; the
+session remains closed to reads, and another `close()` call retries the cleanup.
+The host still owns its decoders and sink.
 
 `frameCount(mode)` gives the complete export length. `startFrame(mode)` is its
 global timeline origin, which can be negative for overlap pre-roll. An event at
