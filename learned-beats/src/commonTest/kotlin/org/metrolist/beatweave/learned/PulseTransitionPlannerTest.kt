@@ -189,6 +189,27 @@ class PulseTransitionPlannerTest {
     }
 
     @Test
+    fun rejectedPulseCoverageDoesNotRequireIndexedRegionAccess() {
+        val base = song()
+        val accepted = AcceptedPulseRegion(0, base.pulse.beats.size,
+            base.pulse.beats.first().seconds, base.pulse.beats.last().seconds,
+            base.pulse.quality)
+        val backing = listOf(accepted)
+        val sequential = object : List<AcceptedPulseRegion> by backing {
+            override fun get(index: Int): AcceptedPulseRegion =
+                error("Sequential region list does not support indexed reads")
+        }
+        val rejected = base.copy(
+            pulse = base.pulse.copy(quality = base.pulse.quality.copy(issues = listOf(
+                BeatGridIssue("UNSUPPORTED_OUTRO", BeatIssueSeverity.ERROR, 0.0,
+                    base.audio.durationSeconds, "full-track pulse is unsafe")))),
+            pulseRegions = sequential,
+        )
+
+        assertEquals(base.pulse.beats.lastIndex, rejected.latestAcceptedPulseBeat())
+    }
+
+    @Test
     fun barCoverageStopsInsideRejectedPulseRegionMembershipScan() {
         val base = song()
         val accepted = AcceptedPulseRegion(0, base.pulse.beats.size,

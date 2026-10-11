@@ -29,10 +29,10 @@ internal fun LocalSongAnalysis.latestAcceptedPulseBeat(
 ): Int? {
     if (pulse.quality.safeForAutomaticMix) return pulse.beats.lastIndex
     var latest: Int? = null
-    var index = 0
-    while (index < pulseRegions.size) {
+    val regions = pulseRegions.iterator()
+    while (regions.hasNext()) {
         cancellationCheck()
-        val region = pulseRegions[index++]
+        val region = regions.next()
         if (region.quality.safeForAutomaticMix && region.startBeat >= 0 &&
             region.endBeatExclusive <= pulse.beats.size &&
             region.endBeatExclusive - region.startBeat >= 2) {
