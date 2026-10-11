@@ -228,6 +228,34 @@ class RubberBandEngineTest {
     }
 
     @Test
+    fun unreachableOutputRetriesTransientDeletionFailure() = withCache { cache ->
+        val engine = RubberBandEngine(cache)
+        var outputDeletionAttempts = 0
+        engine.deleteFile = { file ->
+            if (file.name.startsWith("beatweave-source-")) false
+            else {
+                outputDeletionAttempts++
+                if (outputDeletionAttempts == 1) false else file.delete()
+            }
+        }
+
+        val failure = assertFailsWith<IOException> {
+            engine.prepare(
+                source(),
+                WarpSchedule.from(plan(1.02), source().durationSeconds),
+            ) {}
+        }
+
+        assertTrue(failure.message!!.contains("beatweave-source-"))
+        val outputFailure = assertIs<IOException>(failure.suppressedExceptions.single())
+        assertTrue(outputFailure.message!!.contains("beatweave-stretched-"))
+        assertEquals(2, outputDeletionAttempts)
+        val leftovers = cache.listFiles()!!.toList()
+        assertEquals(1, leftovers.size)
+        assertTrue(leftovers.single().name.startsWith("beatweave-source-"))
+    }
+
+    @Test
     fun preparedCloseReportsDeletionFailureAndCanRetryCleanup() = withCache { cache ->
         val engine = RubberBandEngine(cache)
         var deletionBlocked = true
