@@ -176,4 +176,24 @@ class DetectorContractTest {
         assertEquals(256, reads)
         assertEquals(2, polls)
     }
+
+    @Test
+    fun cancellationInterruptsAttackEnvelopePreparation() {
+        class Cancelled : RuntimeException()
+        // At 4 kHz, 65,537 PCM samples produce 8,193 two-millisecond energy blocks.
+        // The first two polls occur during PCM accumulation; the fourth must therefore
+        // come from the second bounded chunk of attack-envelope derivation.
+        val pcm = FloatArray(65_537) { if (it % 8 == 0) 0.5f else 0.0f }
+        var polls = 0
+
+        assertFailsWith<Cancelled> {
+            BeatDetector.prepareAudio(pcm, 4000, 256, 1024, 0.5) {
+                if (++polls == 4) throw Cancelled()
+            }
+        }
+
+        // Previously preparation completed after two PCM polls without checking cancellation
+        // anywhere in the 8,193-element attack-envelope pass.
+        assertEquals(4, polls)
+    }
 }
