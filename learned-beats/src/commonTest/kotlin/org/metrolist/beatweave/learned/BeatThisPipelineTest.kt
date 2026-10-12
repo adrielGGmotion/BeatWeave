@@ -175,6 +175,22 @@ class BeatThisPipelineTest {
     }
 
     @Test
+    fun frontendPollsCancellationDuringFrameProcessing() {
+        class Cancelled : RuntimeException()
+        var checks = 0
+
+        assertFailsWith<Cancelled> {
+            BeatThisFrontend().transform(FloatArray(22050)) {
+                // Three PCM-validation polls precede frame processing. The former 64-frame
+                // cadence produced only five callbacks for this 51-frame input, including final.
+                if (++checks == 6) throw Cancelled()
+            }
+        }
+
+        assertEquals(6, checks)
+    }
+
+    @Test
     fun frontendMatchesIndependentTorchGoldenValues() {
         // Oracle: torchaudio LogMelSpect at the provenance commit, not this implementation.
         // Boundary frames exercise centered reflection, interior frames FFT/mel normalization.
