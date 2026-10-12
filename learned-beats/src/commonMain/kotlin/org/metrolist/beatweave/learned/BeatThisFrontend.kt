@@ -18,6 +18,16 @@ class BeatThisFrontend {
     }
 
     private val window = DoubleArray(FFT_SIZE) { .5 - .5 * cos(2 * PI * it / FFT_SIZE) }
+    // These depend only on the fixed frontend geometry, not on a frame's samples.
+    private val fftStepReal =
+        DoubleArray(FFT_SIZE.countTrailingZeroBits()) { stage ->
+            cos(-2.0 * PI / (1 shl (stage + 1)))
+        }
+    private val fftStepImaginary =
+        DoubleArray(FFT_SIZE.countTrailingZeroBits()) { stage ->
+            sin(-2.0 * PI / (1 shl (stage + 1)))
+        }
+    private val fftMagnitudeDivisor = sqrt(FFT_SIZE.toDouble())
     private val filters: List<Pair<IntArray, DoubleArray>> = run {
         fun mel(hz: Double) =
             if (hz < 1000.0) hz / (200.0 / 3.0) else 15.0 + ln(hz / 1000.0) / (ln(6.4) / 27.0)
@@ -74,7 +84,7 @@ class BeatThisFrontend {
             }
             fft(real, imag)
             for (i in magnitudes.indices) magnitudes[i] =
-                hypot(real[i], imag[i]) / sqrt(FFT_SIZE.toDouble())
+                hypot(real[i], imag[i]) / fftMagnitudeDivisor
             for (bin in 0 until BINS) {
                 val (indices, weights) = filters[bin]
                 var sum = 0.0
@@ -106,10 +116,10 @@ class BeatThisFrontend {
             }
         }
         var length = 2
+        var stage = 0
         while (length <= size) {
-            val angle = -2.0 * PI / length
-            val stepReal = cos(angle)
-            val stepImag = sin(angle)
+            val stepReal = fftStepReal[stage]
+            val stepImag = fftStepImaginary[stage]
             for (offset in 0 until size step length) {
                 var wr = 1.0
                 var wi = 0.0
@@ -128,6 +138,7 @@ class BeatThisFrontend {
                 }
             }
             length *= 2
+            stage++
         }
     }
 }
