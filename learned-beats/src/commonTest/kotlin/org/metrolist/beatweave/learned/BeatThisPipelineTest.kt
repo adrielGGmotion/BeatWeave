@@ -26,6 +26,33 @@ class BeatThisPipelineTest {
     }
 
     @Test
+    fun reusesChunkStorageWithoutLeakingPreviousSamplesIntoPadding() {
+        val frames = 3000
+        val values = FloatArray(frames * 128) { (it % 13 + 1).toFloat() }
+        var firstChunk: FloatArray? = null
+        var calls = 0
+        val backend =
+            object : BeatThisBackend {
+                override val modelId = "test/reused-chunk"
+
+                override fun infer(logMel: FloatArray, frames: Int): BeatThisLogits {
+                    assertEquals(1500, frames)
+                    firstChunk?.let { assertSame(it, logMel) } ?: run { firstChunk = logMel }
+                    when (calls) {
+                        0 -> assertTrue(logMel.take(6 * 128).all { it == 0f })
+                        2 -> assertTrue(logMel.takeLast(6 * 128).all { it == 0f })
+                    }
+                    calls++
+                    return BeatThisLogits(FloatArray(frames), FloatArray(frames))
+                }
+            }
+
+        BeatThisAnalyzer(backend).infer(MelSpectrogram(frames, values))
+
+        assertEquals(3, calls)
+    }
+
+    @Test
     fun plateauProducesOneCenteredBeatAndDownbeatsUseBeatClock() {
         val beats = FloatArray(100) { -5f }
         for (i in 8..12) beats[i] = 4f

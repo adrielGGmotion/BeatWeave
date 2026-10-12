@@ -94,6 +94,10 @@ class BeatThisAnalyzer(
         val beat = FloatArray(spectrogram.frames) { -1000f }
         val downbeat = FloatArray(spectrogram.frames) { -1000f }
         val assigned = BooleanArray(spectrogram.frames)
+        // Inference is synchronous, so every model call can share one chunk buffer. A four-hour
+        // recording otherwise allocates 484 separate 192,000-float arrays (~372 MB cumulatively).
+        val chunkFrames = min(chunkSize, spectrogram.frames + 2 * border)
+        val chunk = FloatArray(chunkFrames * BeatThisFrontend.BINS)
         for ((chunkIndex, start) in starts.withIndex()) {
             cancellationCheck()
             val sourceStart = max(0, start)
@@ -101,13 +105,17 @@ class BeatThisAnalyzer(
             val leftPad = max(0, -start)
             val rightPad = max(0, min(border, start + chunkSize - spectrogram.frames))
             val frames = sourceEnd - sourceStart + leftPad + rightPad
-            val chunk = FloatArray(frames * BeatThisFrontend.BINS)
+            check(frames == chunkFrames) { "Internal error: inconsistent inference chunk size" }
+            val copiedFrom = leftPad * BeatThisFrontend.BINS
+            if (copiedFrom > 0) chunk.fill(0f, 0, copiedFrom)
             spectrogram.values.copyInto(
                 chunk,
-                leftPad * BeatThisFrontend.BINS,
+                copiedFrom,
                 sourceStart * BeatThisFrontend.BINS,
                 sourceEnd * BeatThisFrontend.BINS,
             )
+            val copiedUntil = copiedFrom + (sourceEnd - sourceStart) * BeatThisFrontend.BINS
+            if (copiedUntil < chunk.size) chunk.fill(0f, copiedUntil, chunk.size)
             val output =
                 if (backend is CancellableBeatThisBackend) {
                     backend.infer(chunk, frames, cancellationCheck)
