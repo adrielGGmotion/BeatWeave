@@ -367,18 +367,45 @@ object BarTracker {
         cancellationCheck: () -> Unit = {},
     ): BarTrackingResult {
         cancellationCheck()
-        require(beats.all { it.seconds.isFinite() && it.seconds >= 0.0 })
-        require(beats.zipWithNext().all { (a, b) -> b.seconds > a.seconds })
-        require(rawDownbeatSeconds.all { it.isFinite() && it >= 0.0 })
-        require(rawDownbeatSeconds.zipWithNext().all { (a, b) -> b > a })
-        require(downbeatLogits.all { it.isFinite() })
-        val times = beats.map { it.seconds }.toDoubleArray()
+        val times = DoubleArray(beats.size)
+        var beatIndex = 0
+        var previousBeat = Double.NEGATIVE_INFINITY
+        val beatIterator = beats.iterator()
+        while (beatIterator.hasNext()) {
+            if (beatIndex > 0 && beatIndex % 256 == 0) cancellationCheck()
+            val beat = beatIterator.next()
+            val seconds = beat.seconds
+            require(seconds.isFinite() && seconds >= 0.0)
+            require(seconds > previousBeat)
+            times[beatIndex++] = seconds
+            previousBeat = seconds
+        }
+        cancellationCheck()
+        val rawDownbeats = ArrayList<Double>(rawDownbeatSeconds.size)
+        var previousRaw = Double.NEGATIVE_INFINITY
+        var rawIndex = 0
+        val rawIterator = rawDownbeatSeconds.iterator()
+        while (rawIterator.hasNext()) {
+            if (rawIndex > 0 && rawIndex % 256 == 0) cancellationCheck()
+            val seconds = rawIterator.next()
+            require(seconds.isFinite() && seconds >= 0.0)
+            require(seconds > previousRaw)
+            rawDownbeats += seconds
+            previousRaw = seconds
+            rawIndex++
+        }
+        cancellationCheck()
+        for (index in downbeatLogits.indices) {
+            if (index > 0 && index % 65536 == 0) cancellationCheck()
+            require(downbeatLogits[index].isFinite())
+        }
+        cancellationCheck()
         val meters = options.pulsesPerBar.sorted()
         val snapshot = options.copy(pulsesPerBar = meters.toList())
         if (times.isEmpty() || downbeatLogits.isEmpty()) {
             return BarTrackingResult(
                 times,
-                rawDownbeatSeconds.toList(),
+                rawDownbeats,
                 emptyList(),
                 emptyList(),
                 emptyList(),
@@ -501,15 +528,15 @@ object BarTracker {
                 beta = previous
             }
         }
-        val mappedRaw = rawDownbeatSeconds.map { time -> nearest(times, time) }
+        val mappedRaw = rawDownbeats.map { time -> nearest(times, time) }
         val observed = BooleanArray(times.size)
         val retainedRaw = IntArray(times.size) { -1 }
         mappedRaw.forEachIndexed { raw, index ->
-            val distance = abs(rawDownbeatSeconds[raw] - times[index])
+            val distance = abs(rawDownbeats[raw] - times[index])
             if (
                 distance <= options.observationRadiusSeconds + options.activationHopSeconds / 2 &&
                     (retainedRaw[index] < 0 ||
-                        distance < abs(rawDownbeatSeconds[retainedRaw[index]] - times[index]))
+                        distance < abs(rawDownbeats[retainedRaw[index]] - times[index]))
             ) {
                 observed[index] = true
                 retainedRaw[index] = raw
@@ -541,7 +568,7 @@ object BarTracker {
                     )
                 )
             }
-        rawDownbeatSeconds.forEachIndexed { raw, time ->
+        rawDownbeats.forEachIndexed { raw, time ->
             val index = mappedRaw[raw]
             if (retainedRaw[index] != raw || index !in boundarySet)
                 edits.add(
@@ -609,7 +636,7 @@ object BarTracker {
         cancellationCheck()
         return BarTrackingResult(
             times,
-            rawDownbeatSeconds.toList(),
+            rawDownbeats,
             boundaries,
             regions,
             edits.sortedBy { it.seconds },

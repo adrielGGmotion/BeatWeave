@@ -359,4 +359,33 @@ class BarTrackerTest {
             BarTracker.track(f.beats, f.raw, f.logits, cancellationCheck = { throw Cancelled() })
         }
     }
+
+    @Test
+    fun beatValidationStopsBeforeReadingTheEntireInputAfterCancellation() {
+        class Cancelled : RuntimeException()
+
+        val backing = List(10_000) { Beat(it * 0.000001, 1f) }
+        var reads = 0
+        val counted =
+            object : AbstractList<Beat>() {
+                override val size: Int
+                    get() = backing.size
+
+                override fun get(index: Int): Beat {
+                    reads++
+                    return backing[index]
+                }
+            }
+        var polls = 0
+
+        assertFailsWith<Cancelled> {
+            BarTracker.track(counted, emptyList(), floatArrayOf(0f)) {
+                if (++polls == 2) throw Cancelled()
+            }
+        }
+
+        // The former all/zipWithNext/map validation read this list 30,000 times before poll 2.
+        assertEquals(2, polls)
+        assertEquals(256, reads)
+    }
 }
