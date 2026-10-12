@@ -370,8 +370,10 @@ object BarTracker {
         val times = DoubleArray(beats.size)
         var beatIndex = 0
         var previousBeat = Double.NEGATIVE_INFINITY
-        for (beat in beats) {
+        val beatIterator = beats.iterator()
+        while (beatIterator.hasNext()) {
             if (beatIndex > 0 && beatIndex % 256 == 0) cancellationCheck()
+            val beat = beatIterator.next()
             val seconds = beat.seconds
             require(seconds.isFinite() && seconds >= 0.0)
             require(seconds > previousBeat)
@@ -381,12 +383,16 @@ object BarTracker {
         cancellationCheck()
         val rawDownbeats = ArrayList<Double>(rawDownbeatSeconds.size)
         var previousRaw = Double.NEGATIVE_INFINITY
-        rawDownbeatSeconds.forEachIndexed { index, seconds ->
-            if (index > 0 && index % 256 == 0) cancellationCheck()
+        var rawIndex = 0
+        val rawIterator = rawDownbeatSeconds.iterator()
+        while (rawIterator.hasNext()) {
+            if (rawIndex > 0 && rawIndex % 256 == 0) cancellationCheck()
+            val seconds = rawIterator.next()
             require(seconds.isFinite() && seconds >= 0.0)
             require(seconds > previousRaw)
             rawDownbeats += seconds
             previousRaw = seconds
+            rawIndex++
         }
         cancellationCheck()
         for (index in downbeatLogits.indices) {
