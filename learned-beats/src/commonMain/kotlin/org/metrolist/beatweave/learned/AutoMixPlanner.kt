@@ -17,6 +17,22 @@ data class AutoMixSearchOptions(
     }
 }
 
+/** Stable platform sort with bounded cooperative-cancellation latency. */
+internal fun <T> MutableList<T>.sortWithCancellation(
+    comparator: Comparator<in T>,
+    cancellationCheck: () -> Unit,
+) {
+    cancellationCheck()
+    var comparisons = 0
+    sortWith { left, right ->
+        val result = comparator.compare(left, right)
+        comparisons++
+        if (comparisons % CANDIDATE_SORT_CANCELLATION_INTERVAL == 0) cancellationCheck()
+        result
+    }
+    cancellationCheck()
+}
+
 enum class AutoMixFailureCode {
     NO_CONFIDENT_BAR_GRID,
     NO_COMPATIBLE_BAR_RANGE,
@@ -273,10 +289,12 @@ object AutoMixPlanner {
                             else ranking.incoming(song.grid, bar, bars),
                         )
                 }
-                return result.sortedWith(
+                result.sortWithCancellation(
                     compareByDescending<RankedStart> { it.part.score }
-                        .thenBy { if (outgoing) -it.bar else it.bar }
+                        .thenBy { if (outgoing) -it.bar else it.bar },
+                    search::checkCancellation,
                 )
+                return result
             }
             fun byMeter(song: SupportedBars, starts: List<RankedStart>) =
                 starts.groupBy { start ->
@@ -347,11 +365,12 @@ object AutoMixPlanner {
                 diagonal++
             }
         }
-        candidates.sortWith(
+        candidates.sortWithCancellation(
             compareByDescending<RankedTransition> { it.evidence.score }
                 .thenBy { it.incoming }
                 .thenByDescending { it.outgoing }
-                .thenBy { it.bars }
+                .thenBy { it.bars },
+            search::checkCancellation,
         )
         for (candidate in candidates) {
             search.checkCancellation()
@@ -490,7 +509,7 @@ object AutoMixPlanner {
             }
             next = row
         }
-        candidates.sortWith(candidateOrder)
+        candidates.sortWithCancellation(candidateOrder, search::checkCancellation)
         search.compatible = candidates.size.toLong()
         for (candidate in candidates) {
             search.checkCancellation()
@@ -1091,3 +1110,5 @@ object AutoMixPlanner {
             )
     }
 }
+
+private const val CANDIDATE_SORT_CANCELLATION_INTERVAL = 1024
