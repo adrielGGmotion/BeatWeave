@@ -197,20 +197,7 @@ class MusicAnalyzer {
             flux[frame] = if (relativeRise > 0.005) novelty.toFloat() else 0f
             acousticAttacks.finishFrame(frame)
         }
-        val blocks = ArrayList<EnergyBlock>()
-        val chunk = sampleRate * 4
-        for (start in pcm.indices step chunk) {
-            cancellationCheck()
-            val end = min(pcm.size, start + chunk)
-            var power = 0.0
-            for (j in start until end) power += pcm[j].toDouble() * pcm[j]
-            blocks +=
-                EnergyBlock(
-                    start.toDouble() / sampleRate,
-                    end.toDouble() / sampleRate,
-                    db(sqrt(power / (end - start))),
-                )
-        }
+        val blocks = measureEnergyBlocks(pcm, sampleRate, cancellationCheck)
         val (key, keyConfidence) =
             estimateKey(highResolutionChroma(pcm, sampleRate, n, cancellationCheck))
         val audio = BeatDetector.prepareAudio(pcm, sampleRate, hop, n, peak, cancellationCheck)
@@ -226,6 +213,34 @@ class MusicAnalyzer {
             blocks.toList(),
             acousticAttacks.finish(),
         )
+    }
+
+    /** Four-second RMS summaries with bounded cooperative-cancellation latency. */
+    internal fun measureEnergyBlocks(
+        pcm: FloatArray,
+        sampleRate: Int,
+        cancellationCheck: () -> Unit,
+    ): List<EnergyBlock> {
+        val blocks = ArrayList<EnergyBlock>()
+        val blockFrames = sampleRate * 4
+        for (start in pcm.indices step blockFrames) {
+            val end = min(pcm.size, start + blockFrames)
+            var power = 0.0
+            var cursor = start
+            while (cursor < end) {
+                cancellationCheck()
+                val chunkEnd = min(end, cursor + PCM_CANCELLATION_INTERVAL)
+                for (j in cursor until chunkEnd) power += pcm[j].toDouble() * pcm[j]
+                cursor = chunkEnd
+            }
+            blocks +=
+                EnergyBlock(
+                    start.toDouble() / sampleRate,
+                    end.toDouble() / sampleRate,
+                    db(sqrt(power / (end - start))),
+                )
+        }
+        return blocks
     }
 
     /**
