@@ -164,7 +164,10 @@ class BeatThisAnalyzer(
                 require(logits.beat[i].isFinite() && logits.downbeat[i].isFinite())
             }
             fun peaks(values: FloatArray): List<Double> {
-                val selected = ArrayList<Int>()
+                val result = ArrayList<Double>()
+                var peak = 0.0
+                var count = 0
+                var previous = -2
                 for (i in values.indices) {
                     if (i % POSTPROCESS_CANCELLATION_INTERVAL == 0) cancellationCheck()
                     if (values[i] <= 0f) continue
@@ -175,25 +178,21 @@ class BeatThisAnalyzer(
                             break
                         }
                     }
-                    if (maximum) selected.add(i)
-                }
-                if (selected.isEmpty()) return emptyList()
-                val result = ArrayList<Double>()
-                var p = selected.first().toDouble()
-                var count = 1
-                var previous = selected.first()
-                for (p2 in selected.drop(1)) {
-                    if (p2 - previous <= 1) {
+                    if (!maximum) continue
+                    if (count == 0) {
+                        peak = i.toDouble()
+                        count = 1
+                    } else if (i - previous <= 1) {
                         count++
-                        p += (p2 - p) / count
+                        peak += (i - peak) / count
                     } else {
-                        result.add(p)
-                        p = p2.toDouble()
+                        result.add(peak)
+                        peak = i.toDouble()
                         count = 1
                     }
-                    previous = p2
+                    previous = i
                 }
-                result.add(p)
+                if (count > 0) result.add(peak)
                 return result
             }
             val beatFrames = peaks(logits.beat)
@@ -205,7 +204,7 @@ class BeatThisAnalyzer(
             if (beats.isEmpty()) return beats to emptyList()
             val downbeatFrames = peaks(logits.downbeat)
             var nearestBeat = 0
-            val snappedDownbeats = ArrayList<Double>(downbeatFrames.size)
+            val downbeats = ArrayList<Double>(min(downbeatFrames.size, beatFrames.size))
             for ((downbeatIndex, frame) in downbeatFrames.withIndex()) {
                 if (downbeatIndex % POSTPROCESS_CANCELLATION_INTERVAL == 0) cancellationCheck()
                 while (nearestBeat < beatFrames.lastIndex) {
@@ -217,15 +216,14 @@ class BeatThisAnalyzer(
                     if (nearestBeat % POSTPROCESS_CANCELLATION_INTERVAL == 0)
                         cancellationCheck()
                 }
-                beatFrames[nearestBeat].takeIf {
-                    abs(it - frame) <= MAX_DOWNBEAT_BEAT_DISTANCE_FRAMES
-                }?.let(snappedDownbeats::add)
+                val beatFrame = beatFrames[nearestBeat]
+                if (abs(beatFrame - frame) <= MAX_DOWNBEAT_BEAT_DISTANCE_FRAMES) {
+                    val seconds = beatFrame / 50.0
+                    // Both peak clocks and the nearest-beat cursor are ordered. Any duplicate
+                    // snap is therefore adjacent, so no second list, hash set, or sort is needed.
+                    if (downbeats.lastOrNull() != seconds) downbeats.add(seconds)
+                }
             }
-            val downbeats =
-                snappedDownbeats
-                    .map { it / 50.0 }
-                    .distinct()
-                    .sorted()
             cancellationCheck()
             return beats to downbeats
         }

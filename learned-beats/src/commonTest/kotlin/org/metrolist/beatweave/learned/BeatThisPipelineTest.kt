@@ -122,6 +122,21 @@ class BeatThisPipelineTest {
     }
 
     @Test
+    fun denseFourHourPlateauCollapsesWithoutChangingItsCenter() {
+        // A four-hour model clock contains 720,001 frames. Treating every equal maximum as an
+        // intermediate boxed candidate used to create that many entries plus a 720,000-entry
+        // drop() copy for each model head before returning this single centered event.
+        val frames = 4 * 60 * 60 * 50 + 1
+        val logits = BeatThisLogits(FloatArray(frames) { 1f }, FloatArray(frames) { 1f })
+
+        val result = BeatThisAnalyzer.postprocess(logits)
+
+        assertEquals(1, result.first.size)
+        assertEquals(7_200.0, result.first.single().seconds)
+        assertEquals(listOf(7_200.0), result.second)
+    }
+
+    @Test
     fun cancellationPropagatesBetweenChunks() {
         var checks = 0
         assertFailsWith<IllegalStateException> {
