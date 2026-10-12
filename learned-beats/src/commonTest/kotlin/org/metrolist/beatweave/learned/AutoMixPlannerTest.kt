@@ -1106,6 +1106,41 @@ class AutoMixPlannerTest {
     }
 
     @Test
+    fun candidateSortPreservesOrderAndPollsCancellationDuringComparisons() {
+        val values = List(20_000) { (it * 7_919) % 20_000 }
+        var baselineComparisons = 0
+        val expected =
+            values.sortedWith { left, right ->
+                baselineComparisons++
+                left.compareTo(right)
+            }
+        assertTrue(baselineComparisons > 100_000)
+
+        val completed = values.toMutableList()
+        var completedChecks = 0
+        completed.sortWithCancellation(compareBy<Int> { it }) { completedChecks++ }
+        assertEquals(expected, completed)
+        assertTrue(completedChecks > 2)
+
+        class Cancelled : RuntimeException()
+        val interrupted = values.toMutableList()
+        var comparisonsBeforeCancellation = 0
+        var cancellationChecks = 0
+        assertFailsWith<Cancelled> {
+            interrupted.sortWithCancellation(
+                Comparator { left, right ->
+                    comparisonsBeforeCancellation++
+                    left.compareTo(right)
+                }
+            ) {
+                if (++cancellationChecks == 2) throw Cancelled()
+            }
+        }
+        assertEquals(2, cancellationChecks)
+        assertEquals(1_024, comparisonsBeforeCancellation)
+    }
+
+    @Test
     fun boundedConstantMeterSearchFitsUnsafeCandidateBeforeReportingExhaustion() {
         val failure =
             assertFailsWith<AutoMixPlanningException> {
