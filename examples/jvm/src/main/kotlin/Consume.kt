@@ -150,6 +150,12 @@ private fun pitchSmoke(engine: RubberBandEngine) {
 
 fun main(args: Array<String>) {
     check(args.size == 2) { "model.onnx|--native-only cache-directory" }
+    val nativeTempDirectory = File(System.getProperty("java.io.tmpdir"))
+    fun extractedNativeLibraries() =
+        nativeTempDirectory.listFiles().orEmpty().filter {
+            it.name.startsWith("beatweave-rubberband-") && it.name.endsWith(".so")
+        }
+    val extractedNativeLibrariesBefore = extractedNativeLibraries().map { it.absolutePath }.toSet()
     if (args[0] != "--native-only") OrtBeatThisBackend(File(args[0]), threads = 2).use { backend ->
         val logits = backend.infer(FloatArray(128 * 51), 51)
         check(logits.beat.size == 51 && logits.downbeat.size == 51)
@@ -266,6 +272,12 @@ fun main(args: Array<String>) {
     )
     check(cache.listFiles().orEmpty().isEmpty())
     println("PASS owned native cache cleanup and idempotent close")
+    val addedExtractedNativeLibraries =
+        extractedNativeLibraries().filter { it.absolutePath !in extractedNativeLibrariesBefore }
+    check(addedExtractedNativeLibraries.isEmpty()) {
+        "Bundled JVM native extraction remained until process exit: $addedExtractedNativeLibraries"
+    }
+    println("PASS bundled JVM native extraction is unlinked after loading")
     println(
         "PASS published JVM integration: ${System.getProperty("beatweave.version", "unspecified")}, no repository source-module dependency"
     )
