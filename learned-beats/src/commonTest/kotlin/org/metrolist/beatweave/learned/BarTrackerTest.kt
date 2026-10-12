@@ -388,4 +388,34 @@ class BarTrackerTest {
         assertEquals(2, polls)
         assertEquals(256, reads)
     }
+
+    @Test
+    fun completeBarCountsScanOrderedBoundariesOnceAcrossManyRegions() {
+        val regionCount = 5_000
+        val starts = (0..regionCount).map { it * 4 }
+        var reads = 0
+        val boundaries =
+            object : AbstractList<Int>() {
+                override val size: Int
+                    get() = starts.size
+
+                override fun get(index: Int): Int {
+                    reads++
+                    return starts[index]
+                }
+            }
+
+        val counts =
+            BarTracker.completeBarsByRegion(
+                boundaries,
+                starts,
+                IntArray(regionCount) { 4 },
+                starts.last(),
+            )
+
+        // The former per-region count rescanned all 5,001 boundaries 5,000 times.
+        assertEquals(25_005_000L, regionCount.toLong() * boundaries.size)
+        assertContentEquals(IntArray(regionCount) { 1 }, counts)
+        assertEquals(5_001, reads)
+    }
 }
