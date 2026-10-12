@@ -90,7 +90,7 @@ class BeatThisFrontend {
         val imag = DoubleArray(FFT_SIZE)
         val magnitudes = DoubleArray(FFT_SIZE / 2 + 1)
         for (frame in 0 until frames) {
-            if (frame % 64 == 0) cancellationCheck()
+            if (frame % FRAME_CANCELLATION_INTERVAL == 0) cancellationCheck()
             val start = frame * HOP - FFT_SIZE / 2
             if (start >= 0 && start <= mono22050.size - FFT_SIZE) {
                 for (i in 0 until FFT_SIZE) {
@@ -161,6 +161,7 @@ class BeatThisFrontend {
 }
 
 private const val PCM_CANCELLATION_INTERVAL = 8192
+private const val FRAME_CANCELLATION_INTERVAL = 4
 
 class MelSpectrogram(val frames: Int, val values: FloatArray) {
     init {
