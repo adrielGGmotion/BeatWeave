@@ -86,6 +86,37 @@ object PulsePhaseAudit {
         )
             return supported
         val referencePeriods = measuredReferencePeriods(reference, cancellationCheck)
+        val regionalRanges = evidence.supportedRanges
+        var previousRangeEnd = Double.NEGATIVE_INFINITY
+        var orderedDisjointRanges = evidence.relation == PulsePhaseRelation.REGIONAL_SUPPORT
+        var rangeCount = 0
+        if (orderedDisjointRanges) {
+            for (range in regionalRanges) {
+                if (rangeCount % 256 == 0) cancellationCheck()
+                if (
+                    !range.startSeconds.isFinite() || !range.endSeconds.isFinite() ||
+                        range.endSeconds < range.startSeconds ||
+                        range.startSeconds <= previousRangeEnd
+                ) orderedDisjointRanges = false
+                previousRangeEnd = range.endSeconds
+                rangeCount++
+            }
+        }
+        var orderedObserved = true
+        var previousObserved = Double.NEGATIVE_INFINITY
+        for ((index, beat) in observed.withIndex()) {
+            if (index % 256 == 0) cancellationCheck()
+            if (!beat.seconds.isFinite() || beat.seconds <= previousObserved) {
+                orderedObserved = false
+                break
+            }
+            previousObserved = beat.seconds
+        }
+        val linearRegionalLookup =
+            evidence.relation == PulsePhaseRelation.REGIONAL_SUPPORT &&
+                orderedObserved && orderedDisjointRanges && regionalRanges.isNotEmpty()
+        var regionalIndex = 0
+        var regionalRange = regionalRanges.firstOrNull()
         for ((index, beat) in observed.withIndex()) {
             if (index % 32 == 0) cancellationCheck()
             if (!beat.seconds.isFinite()) continue
@@ -106,11 +137,24 @@ object PulsePhaseAudit {
                             it.isFinite() && circularDistance(phase, it) <= tolerance
                         } ?: false
                     PulsePhaseRelation.REGIONAL_SUPPORT ->
-                        evidence.supportedRanges.any {
-                            beat.seconds >= it.startSeconds &&
-                                beat.seconds <= it.endSeconds &&
-                                it.offsetCycles.isFinite() &&
-                                circularDistance(phase, it.offsetCycles) <= tolerance
+                        if (linearRegionalLookup) {
+                            while (
+                                regionalIndex < regionalRanges.lastIndex &&
+                                    checkNotNull(regionalRange).endSeconds < beat.seconds
+                            ) regionalRange = regionalRanges[++regionalIndex]
+                            regionalRange?.let {
+                                beat.seconds >= it.startSeconds &&
+                                    beat.seconds <= it.endSeconds &&
+                                    it.offsetCycles.isFinite() &&
+                                    circularDistance(phase, it.offsetCycles) <= tolerance
+                            } ?: false
+                        } else {
+                            regionalRanges.any {
+                                beat.seconds >= it.startSeconds &&
+                                    beat.seconds <= it.endSeconds &&
+                                    it.offsetCycles.isFinite() &&
+                                    circularDistance(phase, it.offsetCycles) <= tolerance
+                            }
                         }
                     else -> false
                 }

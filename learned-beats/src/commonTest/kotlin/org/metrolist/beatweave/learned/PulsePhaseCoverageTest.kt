@@ -288,6 +288,72 @@ class PulsePhaseCoverageTest {
     }
 
     @Test
+    fun chronologicalRegionalMembershipUsesOneRangeSweep() {
+        val beatCount = 4_096
+        val beats = List(beatCount) { Beat(it * .5, .95f) }
+        val backingRanges =
+            List(128) { index ->
+                val start = index * 16.0
+                PulsePhaseRange(start, start + 7.5, 16, 0.0, 1.0, 1.0)
+            }
+        class CountingRanges : AbstractList<PulsePhaseRange>() {
+            var accesses = 0
+            override val size: Int get() = backingRanges.size
+            override fun get(index: Int): PulsePhaseRange {
+                accesses++
+                return backingRanges[index]
+            }
+        }
+        val ranges = CountingRanges()
+
+        val covered = countCoveredBeats(beats, ranges)
+
+        assertEquals(2_048, covered)
+        // The former any() membership test performed 394,240 range reads for this fixture.
+        assertTrue(ranges.accesses <= backingRanges.size * 3)
+    }
+
+    @Test
+    fun chronologicalRegionalLocalSupportUsesOneRangeSweep() {
+        val beatCount = 4_096
+        val beats = List(beatCount) { Beat(.2 + it * .5, .95f) }
+        val independent = List(beatCount + 2) { Beat(.2 + it * .5, .95f) }
+        val backingRanges =
+            List(128) { index ->
+                val start = .2 + index * 16.0
+                PulsePhaseRange(start, start + 7.5, 16, 0.0, 1.0, 1.0)
+            }
+        class CountingRanges : AbstractList<PulsePhaseRange>() {
+            var accesses = 0
+            override val size: Int get() = backingRanges.size
+            override fun get(index: Int): PulsePhaseRange {
+                accesses++
+                return backingRanges[index]
+            }
+        }
+        val ranges = CountingRanges()
+        val evidence =
+            PulsePhaseEvidence(
+                PulsePhaseRelation.REGIONAL_SUPPORT,
+                beatCount,
+                1.0,
+                .5,
+                0.0,
+                1.0,
+                1.0,
+                1.0,
+                ranges,
+                .5,
+            )
+
+        val supported = PulsePhaseAudit.locallySupported(beats, independent, evidence)
+
+        assertEquals(2_048, supported.count { it })
+        // The former any() lookup performed 394,240 range reads for this fixture.
+        assertTrue(ranges.accesses <= backingRanges.size * 3)
+    }
+
+    @Test
     fun longReferenceValidationPollsCancellationBeforeScanningTheWholeClock() {
         class CountingReference(override val size: Int) : AbstractList<Beat>() {
             var accesses = 0
