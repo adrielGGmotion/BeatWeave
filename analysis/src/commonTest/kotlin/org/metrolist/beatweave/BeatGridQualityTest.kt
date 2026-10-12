@@ -91,6 +91,26 @@ class BeatGridQualityTest {
     }
 
     @Test
+    fun quietInsertionNeighborLookupIsLinearAndExact() {
+        val count = 20_000
+        val supported = BooleanArray(count) { it % 4 == 0 }
+
+        val next = PulseNormalizer.nextSupportedPulseInsertionIndices(supported)
+
+        assertEquals(-1, next.last())
+        for (index in 0 until count - 1) {
+            val followingMultiple = (index / 4 + 1) * 4
+            val expected = followingMultiple.takeIf { it < count } ?: -1
+            assertEquals(expected, next[index])
+        }
+        val unsupported = supported.count { !it }.toLong()
+        val formerMinimumCopiedElements = unsupported * (count - 1L)
+        assertEquals(299_985_000L, formerMinimumCopiedElements)
+        // One flag pass plus one reverse pass replaces those per-insertion list copies.
+        assertEquals(40_000L, count * 2L)
+    }
+
+    @Test
     fun eachMultiPulseInsertionRequiresMeasuredReferenceCadence() {
         val completeModel = List(17) { Beat(0.26 + it * 0.5, 1.0f) }
         val modelBeats =
