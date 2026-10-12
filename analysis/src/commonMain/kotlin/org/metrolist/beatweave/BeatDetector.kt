@@ -30,9 +30,12 @@ internal object BeatDetector {
             energy[i / block] += pcm[i].toDouble().pow(2)
         }
         val attacks = DoubleArray(energy.size)
+        var previousAmplitude = 0.0
         for (i in energy.indices) {
             if (i % DETECTOR_CANCELLATION_INTERVAL == 0) cancellationCheck()
-            attacks[i] = max(0.0, sqrt(energy[i]) - if (i > 0) sqrt(energy[i - 1]) else 0.0)
+            val amplitude = sqrt(energy[i])
+            attacks[i] = max(0.0, amplitude - previousAmplitude)
+            previousAmplitude = amplitude
         }
         return AudioContext(peak, attacks, block, pcm.size, rate, hop, window)
     }
