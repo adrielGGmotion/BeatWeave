@@ -20,10 +20,21 @@ data class LocalSongAnalysis(
     /** Independent audible-pattern audit of the same canonical indices; never another clock. */
     val acousticPulse: AcousticPulseReport? = null,
 ) {
+    /** Stable source clock for validation and matching; caller-owned lists are read only once. */
+    private val canonicalBeatSeconds =
+        DoubleArray(pulse.beats.size).also { seconds ->
+            var index = 0
+            for (beat in pulse.beats) seconds[index++] = beat.seconds
+        }
+
+    private val verifiedAcousticPulse by lazy {
+        acousticPulse?.also { it.requireClock(canonicalBeatSeconds) }
+    }
+
     fun matchingGrid(): BeatGrid {
         pulse.quality.requireUsable()
-        requireAcousticPulseRange(0, pulse.beats.size)
-        return BeatGrid(pulse.beats.map { it.seconds }.toDoubleArray())
+        requireAcousticPulseRange(0, canonicalBeatSeconds.size)
+        return BeatGrid(canonicalBeatSeconds.copyOf())
     }
 
     /**
@@ -54,7 +65,7 @@ data class LocalSongAnalysis(
     ) {
         require(
             startBeat >= 0 &&
-                endBeatExclusive <= pulse.beats.size &&
+                endBeatExclusive <= canonicalBeatSeconds.size &&
                 endBeatExclusive - startBeat >= 2
         ) {
             "A pulse range requires at least two in-bounds canonical timestamps"
@@ -71,8 +82,7 @@ data class LocalSongAnalysis(
     }
 
     private fun requireAcousticPulseRange(startBeat: Int, endBeatExclusive: Int) {
-        val evidence = acousticPulse ?: return
-        evidence.requireClock(pulse.beats.map { it.seconds }.toDoubleArray())
+        val evidence = verifiedAcousticPulse ?: return
         require(evidence.supportsRange(startBeat, endBeatExclusive)) {
             "Requested pulse range lacks complete recurring audible attack evidence: " +
                 evidence.assessRange(startBeat, endBeatExclusive).issues.joinToString()
@@ -90,9 +100,7 @@ data class LocalSongAnalysis(
         cancellationCheck: () -> Unit,
     ): BeatGrid {
         requirePulseRange(startBeat, endBeatExclusive, cancellationCheck)
-        return BeatGrid(
-            pulse.beats.subList(startBeat, endBeatExclusive).map { it.seconds }.toDoubleArray()
-        )
+        return BeatGrid(canonicalBeatSeconds.copyOfRange(startBeat, endBeatExclusive))
     }
 
     /**

@@ -54,6 +54,36 @@ class BeatOverlapAcousticContextTest {
     }
 
     @Test
+    fun repeatedAcousticRangeChecksReuseConstructionClockSnapshot() {
+        val base = song()
+        val backing = base.pulse.beats
+        var reads = 0
+        val counted =
+            object : AbstractList<Beat>() {
+                override val size: Int
+                    get() = backing.size
+
+                override fun get(index: Int): Beat {
+                    reads++
+                    return backing[index]
+                }
+            }
+        val countedSong =
+            base.copy(pulse = base.pulse.copy(rawBeats = counted, beats = counted))
+
+        assertEquals(65, reads)
+        reads = 0
+        repeat(100) { countedSong.requirePulseRange(8, 13) }
+
+        // The former per-call map read all 65 beats and allocated a new clock: 6,500 reads here.
+        assertEquals(0, reads)
+        assertContentEquals(
+            backing.subList(8, 13).map { it.seconds }.toDoubleArray(),
+            countedSong.matchingGrid(8, 13).times,
+        )
+    }
+
+    @Test
     fun onlyUnassessedEdgesAreExcludedFromClaimAndEntireSourcePcmRemains() {
         val a = song()
         val acoustic = assertNotNull(a.acousticPulse)
