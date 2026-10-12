@@ -33,6 +33,7 @@ class OrtBeatThisBackend(modelBytes: ByteArray, threads: Int = 2) :
     private val environment: OrtEnvironment
     private val sessionOptions: OrtSession.SessionOptions
     private val session: OrtSession
+    private val closeSequence: RetryableCloseSequence
     private var closed = false
 
     init {
@@ -71,6 +72,7 @@ class OrtBeatThisBackend(modelBytes: ByteArray, threads: Int = 2) :
             collectResourceCleanupFailure(failure, session::close, sessionOptions::close)
             throw failure
         }
+        closeSequence = RetryableCloseSequence(session::close, sessionOptions::close)
     }
 
     @Synchronized
@@ -199,12 +201,29 @@ class OrtBeatThisBackend(modelBytes: ByteArray, threads: Int = 2) :
 
     @Synchronized
     override fun close() {
-        if (!closed) {
-            closed = true
-            collectResourceCleanupFailure(null, session::close, sessionOptions::close)
-                ?.let { throw it }
-        }
+        // Reject inference as soon as shutdown starts, but keep retrying any resource whose close
+        // failed. SessionOptions must remain alive until the session has closed successfully.
+        closed = true
+        closeSequence.close()?.let { throw it }
         // OrtEnvironment is a JVM-wide singleton owned by ORT. Do not close it here.
+    }
+}
+
+/** Close dependent resources in order, resuming at the first failed action on the next call. */
+internal class RetryableCloseSequence(vararg actions: () -> Unit) {
+    private val actions = actions.copyOf()
+    private var next = 0
+
+    fun close(): Throwable? {
+        while (next < actions.size) {
+            try {
+                actions[next]()
+                next++
+            } catch (failure: Throwable) {
+                return failure
+            }
+        }
+        return null
     }
 }
 
