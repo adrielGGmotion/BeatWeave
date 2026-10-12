@@ -55,4 +55,31 @@ class OrtResourceCleanupTest {
         assertEquals(2, cleanups)
         assertNull(collectResourceCleanupFailure(null, {}, {}))
     }
+
+    @Test
+    fun failedSessionCloseCanRetryBeforeClosingDependentOptions() {
+        val sessionFailure = IllegalStateException("transient session close failure")
+        var sessionAttempts = 0
+        var optionCloses = 0
+        val cleanup =
+            RetryableCloseSequence(
+                {
+                    sessionAttempts++
+                    if (sessionAttempts == 1) throw sessionFailure
+                },
+                { optionCloses++ },
+            )
+
+        assertSame(sessionFailure, cleanup.close())
+        assertEquals(1, sessionAttempts)
+        assertEquals(0, optionCloses)
+
+        assertNull(cleanup.close())
+        assertEquals(2, sessionAttempts)
+        assertEquals(1, optionCloses)
+
+        assertNull(cleanup.close())
+        assertEquals(2, sessionAttempts)
+        assertEquals(1, optionCloses)
+    }
 }
