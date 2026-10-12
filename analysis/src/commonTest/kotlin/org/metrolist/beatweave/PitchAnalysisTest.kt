@@ -45,6 +45,17 @@ class PitchAnalysisTest {
     }
 
     @Test
+    fun analyzerOwnedFramesCannotBeMutatedThroughAListCast() {
+        val frames = PitchAnalyzer().analyze(tone(440.0, 11025), 11025).frames
+
+        assertFails {
+            @Suppress("UNCHECKED_CAST")
+            (frames as MutableList<PitchFrame>).clear()
+        }
+        assertTrue(frames.isNotEmpty())
+    }
+
+    @Test
     fun distinguishesSilenceDcOffsetAndAperiodicNoiseFromVoicedAudio() {
         val rate = 11025
         val random = Random(502)
