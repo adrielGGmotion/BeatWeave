@@ -196,4 +196,31 @@ class DetectorContractTest {
         // anywhere in the 8,193-element attack-envelope pass.
         assertEquals(4, polls)
     }
+
+    @Test
+    fun attackEnvelopeRetainsTheLegacySampleClockAndValues() {
+        val rate = 4000
+        val pcm =
+            FloatArray(35) { index ->
+                when (index / 8) {
+                    0 -> 0.25f
+                    1 -> 0.75f
+                    2 -> 0.5f
+                    3 -> if (index % 2 == 0) 1.0f else 0.0f
+                    else -> 0.125f
+                }
+            }
+        val block = 8
+        val energy = DoubleArray((pcm.size + block - 1) / block)
+        for (i in pcm.indices) energy[i / block] += pcm[i].toDouble().pow(2)
+        val legacy =
+            DoubleArray(energy.size) { i ->
+                max(0.0, sqrt(energy[i]) - if (i > 0) sqrt(energy[i - 1]) else 0.0)
+            }
+
+        val prepared = BeatDetector.prepareAudio(pcm, rate, 256, 1024, 1.0) {}
+
+        assertEquals(block, prepared.attackBlock)
+        assertContentEquals(legacy, prepared.attacks)
+    }
 }
