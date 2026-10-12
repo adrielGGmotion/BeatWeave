@@ -111,6 +111,46 @@ class PreparedMusicAnalysisTest {
     }
 
     @Test
+    fun cancellationInterruptsMaximumKeyWindowConstruction() {
+        class Cancelled : RuntimeException()
+        var checks = 0
+
+        assertFailsWith<Cancelled> {
+            keyAnalysisHann(262144) {
+                if (++checks == 3) throw Cancelled()
+            }
+        }
+
+        // Previously all 262,144 cosine evaluations ran between preparation callbacks.
+        assertEquals(3, checks)
+    }
+
+    @Test
+    fun cancellationInterruptsMaximumKeyWindowCopyWithoutChangingValues() {
+        class Cancelled : RuntimeException()
+        val size = 262144
+        val pcm = floatArrayOf(2f, 3f, 5f)
+        val hann = DoubleArray(size) { 0.25 }
+        val real = DoubleArray(size) { Double.NaN }
+        val imaginary = DoubleArray(size) { Double.NaN }
+        var checks = 0
+
+        assertFailsWith<Cancelled> {
+            fillKeyAnalysisWindow(pcm, -1, hann, real, imaginary) {
+                if (++checks == 3) throw Cancelled()
+            }
+        }
+
+        // Previously the complete 262,144-sample copy ran after the frame-entry callback.
+        assertEquals(3, checks)
+
+        fillKeyAnalysisWindow(pcm, -1, hann, real, imaginary) {}
+        assertContentEquals(doubleArrayOf(0.0, 0.5, 0.75, 1.25), real.copyOf(4))
+        assertTrue(real.drop(4).all { it == 0.0 })
+        assertTrue(imaginary.all { it == 0.0 })
+    }
+
+    @Test
     fun cancellationInterruptsSpectralNormalizationBeforeSilentReturn() {
         class Cancelled : RuntimeException()
         val prepared = MusicAnalyzer().prepare(FloatArray(rate * 12), rate)
