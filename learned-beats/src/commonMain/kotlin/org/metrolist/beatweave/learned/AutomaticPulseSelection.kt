@@ -216,27 +216,32 @@ object AutomaticPulseSelector {
             var phaseEvidence =
                 PulsePhaseAudit.assess(model.beats, reference.beats, cancellationCheck)
             if (phaseEvidence.relation == PulsePhaseRelation.REGIONAL_SUPPORT) {
+                // Regional audits perform binary range lookups. Snapshot the public List once so
+                // a valid sequential implementation is not turned into repeated indexed walks.
+                val regionalModelBeats = model.beats.toList()
+                val orderedModelClock = regionalModelBeats.isStrictlyOrdered(cancellationCheck)
                 val supported =
                     phaseEvidence.supportedRanges.filter { range ->
                         cancellationCheck()
                         val local =
-                            model.beats.filterIndexed { index, beat ->
-                                if (index % 256 == 0) cancellationCheck()
-                                beat.seconds >= range.startSeconds &&
-                                    beat.seconds <= range.endSeconds
+                            if (orderedModelClock) {
+                                regionalModelBeats.subList(
+                                    lowerBound(regionalModelBeats, range.startSeconds),
+                                    upperBound(regionalModelBeats, range.endSeconds),
+                                )
+                            } else {
+                                regionalModelBeats.filterIndexed { index, beat ->
+                                    if (index % 256 == 0) cancellationCheck()
+                                    beat.seconds >= range.startSeconds &&
+                                        beat.seconds <= range.endSeconds
+                                }
                             }
                         local.size >= 16 &&
                             onsetAgreement(local, reference, cancellationCheck) >= 0.50 &&
                             localCadenceAgreement(local, reference.beats, cancellationCheck) >= 0.55
                     }
-                val coverage =
-                    model.beats
-                        .count { beat ->
-                            supported.any {
-                                beat.seconds >= it.startSeconds && beat.seconds <= it.endSeconds
-                            }
-                        }
-                        .toDouble() / max(1, model.beats.size)
+                val coverage = countCoveredBeats(regionalModelBeats, supported, cancellationCheck)
+                    .toDouble() / max(1, regionalModelBeats.size)
                 phaseEvidence =
                     phaseEvidence.copy(
                         relation =
@@ -554,6 +559,74 @@ object AutomaticPulseSelector {
         }
         return lo
     }
+
+    private fun upperBound(beats: List<Beat>, time: Double): Int {
+        var lo = 0
+        var hi = beats.size
+        while (lo < hi) {
+            val mid = (lo + hi) / 2
+            if (beats[mid].seconds <= time) lo = mid + 1 else hi = mid
+        }
+        return lo
+    }
+}
+
+/** Counts membership in chronological disjoint regions without a beats-times-regions scan. */
+internal fun countCoveredBeats(
+    beats: List<Beat>,
+    ranges: List<PulsePhaseRange>,
+    cancellationCheck: () -> Unit = {},
+): Int {
+    if (beats.isEmpty() || ranges.isEmpty()) return 0
+    val orderedBeats = beats.isStrictlyOrdered(cancellationCheck)
+    var previousEnd = Double.NEGATIVE_INFINITY
+    var orderedDisjointRanges = true
+    var rangeIndex = 0
+    for (range in ranges) {
+        if (rangeIndex % 256 == 0) cancellationCheck()
+        if (
+            !range.startSeconds.isFinite() || !range.endSeconds.isFinite() ||
+                range.endSeconds < range.startSeconds || range.startSeconds <= previousEnd
+        ) orderedDisjointRanges = false
+        previousEnd = range.endSeconds
+        rangeIndex++
+    }
+    if (!orderedBeats || !orderedDisjointRanges) {
+        var covered = 0
+        for ((beatIndex, beat) in beats.withIndex()) {
+            if (beatIndex % 256 == 0) cancellationCheck()
+            for ((index, range) in ranges.withIndex()) {
+                if (index > 0 && index % 256 == 0) cancellationCheck()
+                if (beat.seconds >= range.startSeconds && beat.seconds <= range.endSeconds) {
+                    covered++
+                    break
+                }
+            }
+        }
+        return covered
+    }
+    var covered = 0
+    rangeIndex = 0
+    var range = ranges[rangeIndex]
+    for ((beatIndex, beat) in beats.withIndex()) {
+        if (beatIndex % 256 == 0) cancellationCheck()
+        while (rangeIndex < ranges.lastIndex && range.endSeconds < beat.seconds) {
+            range = ranges[++rangeIndex]
+        }
+        if (beat.seconds >= range.startSeconds && beat.seconds <= range.endSeconds) covered++
+    }
+    cancellationCheck()
+    return covered
+}
+
+private fun List<Beat>.isStrictlyOrdered(cancellationCheck: () -> Unit): Boolean {
+    var previous = Double.NEGATIVE_INFINITY
+    for ((index, beat) in withIndex()) {
+        if (index % 256 == 0) cancellationCheck()
+        if (!beat.seconds.isFinite() || beat.seconds <= previous) return false
+        previous = beat.seconds
+    }
+    return true
 }
 
 /** Finds usable islands without rewriting or hiding the full-track rejection report. */
