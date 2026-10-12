@@ -376,16 +376,23 @@ class PitchAnalyzer(private val options: PitchAnalysisOptions = PitchAnalysisOpt
                 )
         }
         cancellationCheck()
-        val frameSnapshot = ArrayList<PitchFrame>(frames.size)
-        for (i in frames.indices) {
-            if (i and (PITCH_CANCELLATION_OPERATIONS - 1) == 0) cancellationCheck()
-            frameSnapshot += frames[i]
-        }
-        cancellationCheck()
-        return PitchAnalysis(duration, frameSnapshot, layout.hop.toDouble() / sampleRate, layout.window.toDouble() / sampleRate)
+        return PitchAnalysis(
+            duration,
+            ReadOnlyPitchFrames(frames),
+            layout.hop.toDouble() / sampleRate,
+            layout.window.toDouble() / sampleRate,
+        )
     }
 
     private data class Layout(val window: Int, val hop: Int, val maximumLag: Int, val frames: Int)
+}
+
+/** The analyzer exclusively owns [values], so this view is an immutable snapshot without a copy. */
+private class ReadOnlyPitchFrames(private val values: ArrayList<PitchFrame>) : AbstractList<PitchFrame>() {
+    override val size: Int
+        get() = values.size
+
+    override fun get(index: Int): PitchFrame = values[index]
 }
 
 private const val MAX_PITCH_DURATION_SECONDS = 4.0 * 60.0 * 60.0
