@@ -182,6 +182,9 @@ class PitchAnalyzer(private val options: PitchAnalysisOptions = PitchAnalysisOpt
                 while (copied < decoded.size) {
                     cancellationCheck()
                     val chunkEnd = min(decoded.size, copied + PITCH_CANCELLATION_OPERATIONS)
+                    for (i in copied until chunkEnd) {
+                        require(decoded[i].isFinite()) { "PCM must contain only finite samples" }
+                    }
                     decoded.copyInto(
                         destination = stereoCache,
                         destinationOffset = retainedFrames * 2 + copied,
@@ -198,7 +201,6 @@ class PitchAnalyzer(private val options: PitchAnalysisOptions = PitchAnalysisOpt
                 if (i % 8192 == 0) cancellationCheck()
                 val left = stereoCache[(offset + i) * 2].toDouble()
                 val right = stereoCache[(offset + i) * 2 + 1].toDouble()
-                require(left.isFinite() && right.isFinite()) { "PCM must contain only finite samples" }
                 leftMean += left
                 rightMean += right
             }

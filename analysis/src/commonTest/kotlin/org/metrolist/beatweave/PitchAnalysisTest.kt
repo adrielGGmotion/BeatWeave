@@ -237,6 +237,28 @@ class PitchAnalysisTest {
         assertEquals(mono, analyzer.analyze(source, rate))
     }
 
+    @Test
+    fun stereoDecoderRejectsNonFiniteSamplesOutsideTheLastCompleteWindow() {
+        val rate = 11025
+        // The default 885-sample window leaves this final source frame outside pitch evidence.
+        // Decoder validity still applies to every returned sample, including that unused tail.
+        val sourceFrames = 886
+        val source = object : StereoPcm {
+            override val durationSeconds = sourceFrames.toDouble() / rate
+
+            override fun read(startSeconds: Double, frames: Int, outputSampleRate: Int): FloatArray {
+                assertEquals(0.0, startSeconds)
+                assertEquals(rate, outputSampleRate)
+                assertEquals(sourceFrames, frames)
+                return FloatArray(frames * 2).also { it[it.lastIndex] = Float.NaN }
+            }
+        }
+
+        assertFailsWith<IllegalArgumentException> {
+            PitchAnalyzer().analyze(source, rate)
+        }
+    }
+
     /** DC bias must not hide a stronger pitched channel or promote a weaker competing tone. */
     @Test
     fun stereoChannelSelectionIgnoresDcBias() {
