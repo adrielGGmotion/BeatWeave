@@ -258,7 +258,7 @@ class MusicAnalyzer {
     ): DoubleArray {
         val windowSize = onsetWindow * 8
         val hop = windowSize * 2
-        val hann = DoubleArray(windowSize) { 0.5 - 0.5 * cos(2.0 * PI * it / (windowSize - 1)) }
+        val hann = keyAnalysisHann(windowSize, cancellationCheck)
         val real = DoubleArray(windowSize)
         val imag = DoubleArray(windowSize)
         // Retain sub-semitone position until the whole recording has supplied a tuning estimate.
@@ -274,10 +274,7 @@ class MusicAnalyzer {
             cancellationCheck()
             frameChroma.fill(0.0)
             frameConcertChroma.fill(0.0)
-            for (i in 0 until windowSize) {
-                real[i] = if (base + i in pcm.indices) pcm[base + i] * hann[i] else 0.0
-                imag[i] = 0.0
-            }
+            fillKeyAnalysisWindow(pcm, base, hann, real, imag, cancellationCheck)
             analysisFft(real, imag, cancellationCheck)
             for (bin in 1 until windowSize / 2) {
                 val hz = bin.toDouble() * sampleRate / windowSize
@@ -383,6 +380,37 @@ class MusicAnalyzer {
 
 }
 
+/** Builds the longest analysis window without leaving cancellation unobserved for the full pass. */
+internal fun keyAnalysisHann(
+    size: Int,
+    cancellationCheck: () -> Unit,
+): DoubleArray {
+    require(size > 1)
+    val hann = DoubleArray(size)
+    for (i in hann.indices) {
+        if (i and (ANALYSIS_WINDOW_CANCELLATION_OPERATIONS - 1) == 0) cancellationCheck()
+        hann[i] = 0.5 - 0.5 * cos(2.0 * PI * i / (size - 1))
+    }
+    return hann
+}
+
+/** Copies and windows one sparse key-analysis frame with bounded cancellation latency. */
+internal fun fillKeyAnalysisWindow(
+    pcm: FloatArray,
+    base: Int,
+    hann: DoubleArray,
+    real: DoubleArray,
+    imag: DoubleArray,
+    cancellationCheck: () -> Unit,
+) {
+    require(real.size == hann.size && imag.size == hann.size)
+    for (i in hann.indices) {
+        if (i and (ANALYSIS_WINDOW_CANCELLATION_OPERATIONS - 1) == 0) cancellationCheck()
+        real[i] = if (base + i in pcm.indices) pcm[base + i] * hann[i] else 0.0
+        imag[i] = 0.0
+    }
+}
+
 /** In-place forward radix-two FFT used by onset and key analysis. */
 internal fun analysisFft(
     re: DoubleArray,
@@ -445,4 +473,5 @@ private const val KEY_FINE_BINS_PER_SEMITONE = 12
 private const val MINIMUM_KEY_TUNING_CONCENTRATION = 0.10
 private const val PCM_CANCELLATION_INTERVAL = 65536
 private const val SOURCE_CLOCK_CANCELLATION_INTERVAL = 256
+private const val ANALYSIS_WINDOW_CANCELLATION_OPERATIONS = 32768
 private const val ANALYSIS_FFT_CANCELLATION_OPERATIONS = 32768
