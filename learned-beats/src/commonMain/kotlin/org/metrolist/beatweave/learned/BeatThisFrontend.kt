@@ -75,12 +75,19 @@ class BeatThisFrontend {
         for (frame in 0 until frames) {
             if (frame % 64 == 0) cancellationCheck()
             val start = frame * HOP - FFT_SIZE / 2
-            for (i in 0 until FFT_SIZE) {
-                var source = start + i
-                if (source < 0) source = -source
-                if (source >= mono22050.size) source = 2 * mono22050.size - 2 - source
-                real[i] = mono22050[source] * window[i]
-                imag[i] = 0.0
+            if (start >= 0 && start <= mono22050.size - FFT_SIZE) {
+                for (i in 0 until FFT_SIZE) {
+                    real[i] = mono22050[start + i] * window[i]
+                    imag[i] = 0.0
+                }
+            } else {
+                for (i in 0 until FFT_SIZE) {
+                    var source = start + i
+                    if (source < 0) source = -source
+                    if (source >= mono22050.size) source = 2 * mono22050.size - 2 - source
+                    real[i] = mono22050[source] * window[i]
+                    imag[i] = 0.0
+                }
             }
             fft(real, imag)
             for (i in magnitudes.indices) magnitudes[i] =
