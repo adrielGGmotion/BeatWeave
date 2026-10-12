@@ -703,7 +703,9 @@ object AutoMixPlanner {
         // than assuming the tracker already carries the facade's immutable acoustic mask.
         val tracking =
             try {
-                song.acousticPulse?.let { proposed.withAcousticPulseSupport(it) } ?: proposed
+                song.acousticPulse?.let {
+                    proposed.withAcousticPulseSupport(it) { search.checkCancellation() }
+                } ?: proposed
             } catch (_: IllegalArgumentException) {
                 search.fail(
                     AutoMixFailureCode.SOURCE_COVERAGE_INVALID,

@@ -1,6 +1,7 @@
 package org.metrolist.beatweave.learned
 
 import kotlin.math.PI
+import kotlin.math.roundToInt
 import kotlin.math.sin
 import kotlin.test.*
 import org.metrolist.beatweave.*
@@ -81,6 +82,30 @@ class BeatOverlapAcousticContextTest {
             backing.subList(8, 13).map { it.seconds }.toDoubleArray(),
             countedSong.matchingGrid(8, 13).times,
         )
+    }
+
+    @Test
+    fun acousticBarMaskStopsWhenCancellationIsRequested() {
+        class Cancelled : RuntimeException()
+
+        val source = song()
+        val beats = source.pulse.beats
+        val logits = FloatArray((source.audio.durationSeconds * 50).roundToInt()) { -8f }
+        source.audio.downbeatSeconds.forEach {
+            logits[(it * 50).roundToInt()] = 8f
+        }
+        val phaseOnly = BarTracker.track(beats, source.audio.downbeatSeconds, logits)
+        assertTrue(phaseOnly.barCount > 2)
+        var polls = 0
+
+        assertFailsWith<Cancelled> {
+            phaseOnly.withAcousticPulseSupport(assertNotNull(source.acousticPulse)) {
+                if (++polls == 3) throw Cancelled()
+            }
+        }
+
+        // The former mask builder had no cancellation callback and necessarily finalized every bar.
+        assertEquals(3, polls)
     }
 
     @Test

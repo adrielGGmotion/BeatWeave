@@ -280,10 +280,18 @@ internal constructor(
         )
 
     /** Requires direct local activity and complete context for every interval in each bar. */
-    fun withAcousticPulseSupport(evidence: AcousticPulseReport): BarTrackingResult {
+    fun withAcousticPulseSupport(evidence: AcousticPulseReport): BarTrackingResult =
+        withAcousticPulseSupport(evidence) {}
+
+    internal fun withAcousticPulseSupport(
+        evidence: AcousticPulseReport,
+        cancellationCheck: () -> Unit,
+    ): BarTrackingResult {
+        cancellationCheck()
         evidence.requireClock(seconds)
         val support =
             BooleanArray(barCount) { bar ->
+                cancellationCheck()
                 evidence.supportsRange(boundaries[bar].beatIndex, boundaries[bar + 1].beatIndex + 1)
             }
         return BarTrackingResult(

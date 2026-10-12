@@ -158,7 +158,7 @@ class LocalSongAnalyzer(private val backend: BeatThisBackend) {
                     cancellationCheck = cancellationCheck,
                 )
                 .withOrderedPulseSupport(selection.regions.accepted, cancellationCheck)
-                .withAcousticPulseSupport(acousticPulse)
+                .withAcousticPulseSupport(acousticPulse, cancellationCheck)
         val barWarnings =
             if (bars.safeForAutomaticBars) emptyList()
             else
