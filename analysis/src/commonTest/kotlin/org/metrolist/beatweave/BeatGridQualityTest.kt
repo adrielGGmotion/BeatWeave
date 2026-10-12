@@ -9,6 +9,30 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class BeatGridQualityTest {
+    private class SequentialClock<T>(private val values: List<T>) : List<T> by values {
+        var indexedReads = 0L
+            private set
+        var iteratorReads = 0L
+            private set
+
+        override fun get(index: Int): T {
+            indexedReads++
+            return values[index]
+        }
+
+        override fun iterator(): Iterator<T> {
+            val source = values.iterator()
+            return object : Iterator<T> {
+                override fun hasNext(): Boolean = source.hasNext()
+
+                override fun next(): T {
+                    iteratorReads++
+                    return source.next()
+                }
+            }
+        }
+    }
+
     @Test
     fun retainedDownbeatsPreserveInputOrderDuplicatesAndStrictTolerance() {
         val beats = List(16) { Beat(0.25 + it * 0.5, 1.0f) }
@@ -88,6 +112,49 @@ class BeatGridQualityTest {
             }
         }
         assertEquals(3, auditChecks)
+    }
+
+    @Test
+    fun sequentialPulseClocksAreSnapshottedBeforeIndexedCadenceLookups() {
+        val count = 4_096
+        val beats = List(count) { Beat(0.25 + it * 0.5, 1.0f) }
+        val duration = beats.last().seconds + 1.0
+        fun reference(clock: List<Beat>) =
+            Analysis(
+                durationSeconds = duration,
+                bpm = 120.0,
+                tempoConfidence = 1.0,
+                beats = clock,
+                rmsDb = -12.0,
+                peakDb = -1.0,
+                spectralCentroidHz = 500.0,
+                keyEstimate = "unknown",
+                keyConfidence = 0.0,
+                energyBlocks = emptyList(),
+                onsetEnvelope = FloatArray(0),
+                onsetHopSeconds = 0.01,
+                warnings = emptyList(),
+            )
+
+        val auditedBeats = SequentialClock(beats)
+        val auditedReference = SequentialClock(beats)
+        val report = BeatGridQuality.audit(auditedBeats, auditedReference, duration)
+
+        val normalizedBeats = SequentialClock(beats)
+        val normalizedReference = SequentialClock(beats)
+        val normalized =
+            PulseNormalizer.normalize(normalizedBeats, reference(normalizedReference))
+
+        assertTrue(report.safeForAutomaticMix)
+        assertTrue(normalized.quality.safeForAutomaticMix)
+        assertEquals(beats, normalized.beats)
+        for (clock in listOf(auditedBeats, auditedReference, normalizedBeats, normalizedReference)) {
+            assertEquals(count.toLong(), clock.iteratorReads)
+            assertEquals(0L, clock.indexedReads)
+        }
+        // The old agreement loop alone read both ends of every measured bracket. A linked list
+        // would traverse at least sum(2 * index + 3) elements before later normalization passes.
+        assertEquals(16_777_215L, count.toLong() * count - 1L)
     }
 
     @Test
