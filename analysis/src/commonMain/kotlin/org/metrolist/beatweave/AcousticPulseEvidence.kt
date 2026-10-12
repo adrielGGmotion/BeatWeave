@@ -145,6 +145,30 @@ internal constructor(
 
     private val windowValues = windows.toList()
     private val contrasts = intervalContrasts.copyOf()
+    /** Range-count summaries keep repeated planner queries independent of selected span length. */
+    private val activePrefix = IntArray(contrasts.size + 1)
+    private val missingContextPrefix = IntArray(contrasts.size + 1)
+    private val nonrecurringPrefix = IntArray(contrasts.size + 1)
+    private val adjacentInactivePrefix = IntArray(contrasts.size + 1)
+
+    init {
+        var previousInactive = false
+        for (interval in contrasts.indices) {
+            val active = isActive(interval)
+            val windowIndex = interval - 4
+            val missingContext = windowIndex !in windowValues.indices
+            val nonrecurring = !missingContext && !windowValues[windowIndex].supported
+            activePrefix[interval + 1] = activePrefix[interval] + if (active) 1 else 0
+            missingContextPrefix[interval + 1] =
+                missingContextPrefix[interval] + if (missingContext) 1 else 0
+            nonrecurringPrefix[interval + 1] =
+                nonrecurringPrefix[interval] + if (nonrecurring) 1 else 0
+            adjacentInactivePrefix[interval + 1] =
+                adjacentInactivePrefix[interval] + if (!active && previousInactive) 1 else 0
+            previousInactive = !active
+        }
+    }
+
     val windows: List<AcousticPulseWindow>
         get() = windowValues.toList()
 
@@ -170,8 +194,16 @@ internal constructor(
     private fun isActive(interval: Int) =
         contrasts[interval] >= AcousticPulseEvidence.MINIMUM_CONTRAST
 
-    fun supportsRange(startBeat: Int, endBeatExclusive: Int): Boolean =
-        assessRange(startBeat, endBeatExclusive).supported
+    fun supportsRange(startBeat: Int, endBeatExclusive: Int): Boolean {
+        val intervalEndExclusive = requireRange(startBeat, endBeatExclusive)
+        val intervalCount = intervalEndExclusive - startBeat
+        val active = activePrefix[intervalEndExclusive] - activePrefix[startBeat]
+        return missingContextPrefix[intervalEndExclusive] == missingContextPrefix[startBeat] &&
+            nonrecurringPrefix[intervalEndExclusive] == nonrecurringPrefix[startBeat] &&
+            adjacentInactivePrefix[intervalEndExclusive] ==
+                adjacentInactivePrefix[startBeat + 1] &&
+            active.toLong() * 2 >= intervalCount
+    }
 
     /**
      * Requires every requested interval's own evaluated context, at least half of the requested
@@ -181,31 +213,20 @@ internal constructor(
      * 4 to beat 8 is queried as (4, 9), covering intervals 4, 5, 6 and 7.
      */
     fun assessRange(startBeat: Int, endBeatExclusive: Int): AcousticPulseRangeAssessment {
-        require(
-            startBeat >= 0 &&
-                endBeatExclusive >= 0 &&
-                endBeatExclusive <= beatCount &&
-                endBeatExclusive.toLong() - startBeat.toLong() >= 2L
-        ) {
-            "A pulse range needs at least two in-bounds boundary observations"
-        }
+        val intervalEndExclusive = requireRange(startBeat, endBeatExclusive)
+        val active = activePrefix[intervalEndExclusive] - activePrefix[startBeat]
         val issues = mutableSetOf<AcousticPulseIssue>()
-        var active = 0
-        var previousInactive = false
-        for (interval in startBeat until endBeatExclusive - 1) {
-            val windowIndex = interval - 4
-            if (windowIndex !in windowValues.indices) {
-                issues += AcousticPulseIssue.INSUFFICIENT_CONTEXT
-            } else if (!windowValues[windowIndex].supported) {
-                issues += AcousticPulseIssue.NONRECURRING_ATTACKS
-            }
-            val inactive = !isActive(interval)
-            if (!inactive) active++
-            if (inactive && previousInactive)
-                issues += AcousticPulseIssue.INSUFFICIENT_LOCAL_ATTACKS
-            previousInactive = inactive
-        }
-        val fraction = active.toDouble() / (endBeatExclusive - startBeat - 1)
+        if (missingContextPrefix[intervalEndExclusive] - missingContextPrefix[startBeat] > 0)
+            issues += AcousticPulseIssue.INSUFFICIENT_CONTEXT
+        if (nonrecurringPrefix[intervalEndExclusive] - nonrecurringPrefix[startBeat] > 0)
+            issues += AcousticPulseIssue.NONRECURRING_ATTACKS
+        if (
+            adjacentInactivePrefix[intervalEndExclusive] -
+                adjacentInactivePrefix[startBeat + 1] >
+                0
+        )
+            issues += AcousticPulseIssue.INSUFFICIENT_LOCAL_ATTACKS
+        val fraction = active.toDouble() / (intervalEndExclusive - startBeat)
         if (fraction < 0.5) issues += AcousticPulseIssue.INSUFFICIENT_LOCAL_ATTACKS
         return AcousticPulseRangeAssessment(
             startBeat,
@@ -214,6 +235,18 @@ internal constructor(
             issues.toSet(),
             fraction,
         )
+    }
+
+    private fun requireRange(startBeat: Int, endBeatExclusive: Int): Int {
+        require(
+            startBeat >= 0 &&
+                endBeatExclusive >= 0 &&
+                endBeatExclusive <= beatCount &&
+                endBeatExclusive.toLong() - startBeat.toLong() >= 2L
+        ) {
+            "A pulse range needs at least two in-bounds boundary observations"
+        }
+        return endBeatExclusive - 1
     }
 }
 

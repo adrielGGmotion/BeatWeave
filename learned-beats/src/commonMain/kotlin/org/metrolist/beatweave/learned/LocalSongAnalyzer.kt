@@ -84,8 +84,9 @@ data class LocalSongAnalysis(
     private fun requireAcousticPulseRange(startBeat: Int, endBeatExclusive: Int) {
         val evidence = verifiedAcousticPulse ?: return
         require(evidence.supportsRange(startBeat, endBeatExclusive)) {
+            val assessment = evidence.assessRange(startBeat, endBeatExclusive)
             "Requested pulse range lacks complete recurring audible attack evidence: " +
-                evidence.assessRange(startBeat, endBeatExclusive).issues.joinToString()
+                assessment.issues.joinToString()
         }
     }
 

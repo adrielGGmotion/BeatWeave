@@ -143,6 +143,106 @@ class AcousticPulseEvidenceTest {
     }
 
     @Test
+    fun preparedRangeSummariesMatchTheLegacyScanForEveryRange() {
+        val beatCount = 17
+        val contrasts =
+            DoubleArray(beatCount - 1) { if (it in setOf(5, 6, 11)) 0.0 else 0.01 }
+        val windows =
+            List(beatCount - 8) { start ->
+                AcousticPulseWindow(
+                    start,
+                    start + 9,
+                    start.toDouble(),
+                    (start + 8).toDouble(),
+                    1.0,
+                    1.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    start !in setOf(2, 7),
+                )
+            }
+        val report =
+            AcousticPulseReport(DoubleArray(beatCount) { it.toDouble() }, windows, contrasts)
+
+        fun legacy(startBeat: Int, endBeatExclusive: Int): AcousticPulseRangeAssessment {
+            val issues = mutableSetOf<AcousticPulseIssue>()
+            var active = 0
+            var previousInactive = false
+            for (interval in startBeat until endBeatExclusive - 1) {
+                val windowIndex = interval - 4
+                if (windowIndex !in windows.indices)
+                    issues += AcousticPulseIssue.INSUFFICIENT_CONTEXT
+                else if (!windows[windowIndex].supported)
+                    issues += AcousticPulseIssue.NONRECURRING_ATTACKS
+                val inactive = contrasts[interval] < AcousticPulseEvidence.MINIMUM_CONTRAST
+                if (!inactive) active++
+                if (inactive && previousInactive)
+                    issues += AcousticPulseIssue.INSUFFICIENT_LOCAL_ATTACKS
+                previousInactive = inactive
+            }
+            val fraction = active.toDouble() / (endBeatExclusive - startBeat - 1)
+            if (fraction < 0.5) issues += AcousticPulseIssue.INSUFFICIENT_LOCAL_ATTACKS
+            return AcousticPulseRangeAssessment(
+                startBeat,
+                endBeatExclusive,
+                issues.isEmpty(),
+                issues.toSet(),
+                fraction,
+            )
+        }
+
+        for (start in 0 until beatCount - 1) {
+            for (endExclusive in start + 2..beatCount) {
+                val expected = legacy(start, endExclusive)
+                assertEquals(
+                    expected,
+                    report.assessRange(start, endExclusive),
+                    "$start until $endExclusive",
+                )
+                assertEquals(
+                    expected.supported,
+                    report.supportsRange(start, endExclusive),
+                    "$start until $endExclusive fast path",
+                )
+            }
+        }
+    }
+
+    @Test
+    fun repeatedLongRangeQueriesUsePreparedSummaries() {
+        val intervalCount = 10_000
+        val windows =
+            List(intervalCount - 7) { start ->
+                AcousticPulseWindow(
+                    start,
+                    start + 9,
+                    start.toDouble(),
+                    (start + 8).toDouble(),
+                    1.0,
+                    1.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    true,
+                )
+            }
+        val report =
+            AcousticPulseReport(
+                DoubleArray(intervalCount + 1) { it.toDouble() },
+                windows,
+                DoubleArray(intervalCount) { 0.01 },
+            )
+        val queries = 1_000
+        val intervalsPerQuery = intervalCount - 7
+
+        repeat(queries) { assertTrue(report.supportsRange(4, intervalCount - 2)) }
+
+        // The former scan visited every selected interval for every identical query.
+        assertEquals(9_993_000L, queries.toLong() * intervalsPerQuery)
+    }
+
+    @Test
     fun cancellationIsPolledDuringAssessmentAndMeasurement() {
         var calls = 0
         assertFailsWith<InterruptedFixture> {
