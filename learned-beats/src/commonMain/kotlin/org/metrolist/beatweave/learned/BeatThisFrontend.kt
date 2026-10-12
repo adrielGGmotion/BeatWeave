@@ -27,6 +27,23 @@ class BeatThisFrontend {
         DoubleArray(FFT_SIZE.countTrailingZeroBits()) { stage ->
             sin(-2.0 * PI / (1 shl (stage + 1)))
         }
+    private val fftSwapPairs = run {
+        val pairs = ArrayList<Int>()
+        var reversed = 0
+        for (index in 1 until FFT_SIZE) {
+            var bit = FFT_SIZE shr 1
+            while (reversed and bit != 0) {
+                reversed = reversed xor bit
+                bit = bit shr 1
+            }
+            reversed = reversed xor bit
+            if (index < reversed) {
+                pairs.add(index)
+                pairs.add(reversed)
+            }
+        }
+        pairs.toIntArray()
+    }
     private val fftMagnitudeDivisor = sqrt(FFT_SIZE.toDouble())
     private val filters: List<Pair<IntArray, DoubleArray>> = run {
         fun mel(hz: Double) =
@@ -105,22 +122,15 @@ class BeatThisFrontend {
 
     private fun fft(real: DoubleArray, imaginary: DoubleArray) {
         val size = real.size
-        var j = 0
-        for (i in 1 until size) {
-            var bit = size shr 1
-            while (j and bit != 0) {
-                j = j xor bit
-                bit = bit shr 1
-            }
-            j = j xor bit
-            if (i < j) {
-                val r = real[i]
-                real[i] = real[j]
-                real[j] = r
-                val im = imaginary[i]
-                imaginary[i] = imaginary[j]
-                imaginary[j] = im
-            }
+        for (pair in fftSwapPairs.indices step 2) {
+            val first = fftSwapPairs[pair]
+            val second = fftSwapPairs[pair + 1]
+            val r = real[first]
+            real[first] = real[second]
+            real[second] = r
+            val im = imaginary[first]
+            imaginary[first] = imaginary[second]
+            imaginary[second] = im
         }
         var length = 2
         var stage = 0
