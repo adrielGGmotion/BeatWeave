@@ -76,6 +76,24 @@ class PreparedMusicAnalysisTest {
     }
 
     @Test
+    fun cancellationInterruptsInsideOneEnergyBlock() {
+        class Cancelled : RuntimeException()
+        // This is shorter than one four-second block at 20 kHz, but crosses the 65,536-sample
+        // cancellation boundary inside that block.
+        val pcm = FloatArray(65_537) { 0.25f }
+        var checks = 0
+
+        assertFailsWith<Cancelled> {
+            MusicAnalyzer().measureEnergyBlocks(pcm, 20_000) {
+                if (++checks == 2) throw Cancelled()
+            }
+        }
+
+        // Previously the whole block completed after its single entry poll.
+        assertEquals(2, checks)
+    }
+
+    @Test
     fun cancellationInterruptsMaximumKeyAnalysisFft() {
         class Cancelled : RuntimeException()
         val size = 262144
