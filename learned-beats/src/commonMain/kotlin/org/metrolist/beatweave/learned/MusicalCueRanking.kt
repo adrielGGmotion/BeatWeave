@@ -234,14 +234,19 @@ internal class MusicalCueRanking(
         }
 
         val duration = analysis.durationSeconds
-        private val sourceBlocks = analysis.energyBlocks
-        private val validSourceBlocks =
-            duration.isFinite() && duration > 0.0 && validBlocks(sourceBlocks)
+        // Analysis exposes a general List. Snapshot through its iterator before using indexed
+        // prefix queries: callers may supply a sequential list whose get(index) is unavailable or
+        // O(index), and cue ranking must not turn a valid feature timeline into a crash or an
+        // accidental quadratic scan.
+        private val sourceBlocks =
+            if (duration.isFinite() && duration > 0.0)
+                validBlockSnapshot(analysis.energyBlocks)
+            else null
         private val sourceCoverageSeconds =
-            if (validSourceBlocks) coveredDuration(sourceBlocks) else 0.0
+            sourceBlocks?.let(::coveredDuration) ?: 0.0
         val available =
-            validSourceBlocks && sourceCoverageSeconds > MINIMUM_CUE_EVIDENCE_SECONDS
-        private val blocks = if (available) sourceBlocks else emptyList()
+            sourceBlocks != null && sourceCoverageSeconds > MINIMUM_CUE_EVIDENCE_SECONDS
+        private val blocks = if (available) checkNotNull(sourceBlocks) else emptyList()
         // Energy blocks describe spans, not equally weighted observations. Counting each block
         // once lets arbitrary feature segmentation change whether the same passage is considered
         // quiet. Use an upper duration-weighted median so splitting a block without changing its
@@ -257,19 +262,24 @@ internal class MusicalCueRanking(
             if (envelope.isEmpty() || !duration.isFinite() || duration <= 0.0) 0.0
             else measuredOnset(0.0, duration).mean
 
-        private fun validBlocks(values: List<EnergyBlock>): Boolean {
-            for (i in values.indices) {
-                if (i % CANCELLATION_INTERVAL == 0) cancellationCheck()
-                val block = values[i]
+        private fun validBlockSnapshot(values: List<EnergyBlock>): List<EnergyBlock>? {
+            val result = ArrayList<EnergyBlock>(values.size)
+            var previousEnd: Double? = null
+            var index = 0
+            for (block in values) {
+                if (index % CANCELLATION_INTERVAL == 0) cancellationCheck()
                 if (
                     !block.startSeconds.isFinite() || !block.endSeconds.isFinite() ||
                         !block.rmsDb.isFinite() || block.endSeconds <= block.startSeconds ||
                         block.startSeconds < 0.0 || block.endSeconds > duration ||
-                        i > 0 && block.startSeconds < values[i - 1].endSeconds
-                ) return false
+                        previousEnd?.let { block.startSeconds < it } == true
+                ) return null
+                result += block
+                previousEnd = block.endSeconds
+                index++
             }
             cancellationCheck()
-            return true
+            return result
         }
 
         private fun coveredDuration(values: List<EnergyBlock>): Double {

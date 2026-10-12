@@ -385,6 +385,40 @@ class AutoMixPlannerTest {
         assertEquals(coarsePart, segmentedPart)
     }
 
+    @Test
+    fun cueRankingAcceptsSequentialEnergyBlockListsWithoutIndexedReads() {
+        val measured = withBarEnergy(song(List(20) { 4 }), List(20) { -18.0 })
+        val backing = measured.audio.energyBlocks
+        var iterated = 0
+        val sequential =
+            object : List<EnergyBlock> by backing {
+                override fun get(index: Int): EnergyBlock =
+                    error("Sequential energy list does not support indexed reads")
+
+                override fun iterator(): Iterator<EnergyBlock> {
+                    val iterator = backing.iterator()
+                    return object : Iterator<EnergyBlock> {
+                        override fun hasNext() = iterator.hasNext()
+
+                        override fun next(): EnergyBlock {
+                            iterated++
+                            return iterator.next()
+                        }
+                    }
+                }
+            }
+        val sequentialSong =
+            measured.copy(audio = measured.audio.copy(energyBlocks = sequential))
+
+        val expected = LocalMixPlanner.bestTransition(measured, measured).automaticSelection
+        val actual = LocalMixPlanner.bestTransition(sequentialSong, sequentialSong).automaticSelection
+
+        assertEquals(expected, actual)
+        // Each track timeline is copied exactly once; all validation and binary-search queries use
+        // the owned random-access snapshot rather than revisiting the caller's sequential list.
+        assertEquals(backing.size * 2, iterated)
+    }
+
     /** Missing audio outside the recording must not be treated as a measured dynamics change. */
     @Test
     fun cueRankingDoesNotFabricateLiftsAtTrackBoundaries() {
