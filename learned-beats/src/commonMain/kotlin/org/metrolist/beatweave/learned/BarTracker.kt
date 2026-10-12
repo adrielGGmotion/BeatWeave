@@ -587,14 +587,22 @@ object BarTracker {
                 } +
                 times.size
         val regionIndex = IntArray(times.size)
+        val regionMeters =
+            IntArray(regionStarts.size - 1) { index ->
+                states[path[regionStarts[index]]].meter
+            }
+        val completeBars =
+            completeBarsByRegion(
+                boundaryIndices,
+                regionStarts,
+                regionMeters,
+                times.lastIndex,
+                cancellationCheck,
+            )
         val regions =
             regionStarts.zipWithNext().mapIndexed { index, (start, end) ->
                 for (beat in start until end) regionIndex[beat] = index
-                val meter = states[path[start]].meter
-                val complete =
-                    boundaryIndices.count {
-                        it >= start && it + meter <= end && it + meter <= times.lastIndex
-                    }
+                val meter = regionMeters[index]
                 val downbeatScores =
                     (start until end)
                         .filter { it in boundarySet }
@@ -607,7 +615,7 @@ object BarTracker {
                     start,
                     end,
                     meter,
-                    complete,
+                    completeBars[index],
                     (start until end).sumOf { statePosterior[it] } / (end - start),
                     (start until end).minOf { statePosterior[it] },
                     (start until end).count {
@@ -644,6 +652,44 @@ object BarTracker {
             supported,
             snapshot,
         )
+    }
+
+    internal fun completeBarsByRegion(
+        boundaryIndices: List<Int>,
+        regionStarts: List<Int>,
+        pulsesPerRegion: IntArray,
+        lastBeatIndex: Int,
+        cancellationCheck: () -> Unit = {},
+    ): IntArray {
+        require(regionStarts.size == pulsesPerRegion.size + 1)
+        val result = IntArray(pulsesPerRegion.size)
+        val boundaries = boundaryIndices.iterator()
+        var boundary: Int? = null
+        var boundaryReads = 0
+        fun advance() {
+            boundary =
+                if (boundaries.hasNext()) {
+                    if (boundaryReads > 0 && boundaryReads % 256 == 0) cancellationCheck()
+                    boundaryReads++
+                    boundaries.next()
+                } else null
+        }
+        cancellationCheck()
+        advance()
+        for (region in pulsesPerRegion.indices) {
+            if (region > 0 && region % 256 == 0) cancellationCheck()
+            val start = regionStarts[region]
+            val end = regionStarts[region + 1]
+            val meter = pulsesPerRegion[region]
+            while (boundary != null && boundary!! < start) advance()
+            while (boundary != null && boundary!! < end) {
+                val beat = boundary!!
+                if (beat + meter <= end && beat + meter <= lastBeatIndex) result[region]++
+                advance()
+            }
+        }
+        cancellationCheck()
+        return result
     }
 
     private data class State(val meter: Int, val phase: Int)
