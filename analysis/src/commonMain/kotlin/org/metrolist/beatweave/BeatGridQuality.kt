@@ -473,10 +473,19 @@ object PulseNormalizer {
             }
         }
         val output = cleaned.toMutableList()
+        // Quiet insertion support needs the nearest directly observed insertion on each side.
+        // Repeated take/drop calls copied almost the complete insertion list for every missing
+        // candidate, making a fragmented long clock quadratic before it could be declined. Build
+        // the right-neighbour table once and retain the left neighbour while walking forward.
+        val insertionHasEvidence = BooleanArray(inserts.size) { inserts[it].candidate != null }
+        val nextSupportedInsertion =
+            nextSupportedPulseInsertionIndices(insertionHasEvidence, cancellationCheck)
+        var previousSupportedInsertion: Insert? = null
         for ((index, insert) in inserts.withIndex()) {
             checkCancellationPeriodically()
             if (insert.candidate != null) {
                 val beat = insert.candidate
+                previousSupportedInsertion = insert
                 output += beat
                 repairs +=
                     PulseRepair(
@@ -490,8 +499,11 @@ object PulseNormalizer {
             } else {
                 // One or two quiet implied pulses may be bridged only when directly supported
                 // inserted pulses bracket them within three pulse periods on BOTH sides.
-                val before = inserts.take(index).lastOrNull { it.candidate != null }
-                val after = inserts.drop(index + 1).firstOrNull { it.candidate != null }
+                val before = previousSupportedInsertion
+                val after =
+                    nextSupportedInsertion[index]
+                        .takeIf { it >= 0 }
+                        ?.let(inserts::get)
                 val period = measuredLocalPeriod(reference, insert.predicted)
                 if (
                     period != null &&
@@ -593,6 +605,23 @@ object PulseNormalizer {
             agreement,
             cancellationCheck,
         )
+    }
+
+    /** Strictly-later supported insertion for every position; -1 means none. */
+    internal fun nextSupportedPulseInsertionIndices(
+        supported: BooleanArray,
+        cancellationCheck: () -> Unit = {},
+    ): IntArray {
+        cancellationCheck()
+        val nextByIndex = IntArray(supported.size) { -1 }
+        var next = -1
+        for (index in supported.lastIndex downTo 0) {
+            if (index % PULSE_CANCELLATION_INTERVAL == 0) cancellationCheck()
+            nextByIndex[index] = next
+            if (supported[index]) next = index
+        }
+        cancellationCheck()
+        return nextByIndex
     }
 
     internal fun localPeriod(beats: List<Beat>, at: Double): Double? {
